@@ -28,52 +28,16 @@ python3 parser.py --out my_listings.csv
 python3 parser.py --rows 100
 ```
 
-**Disable Google Sheets upload:**
-```bash
-python3 parser.py --no-sheets
-```
-
-## Google Sheets Integration
-
-The script automatically uploads results to Google Sheets if configured.
-
-### Setup Steps
-
-1. **Create a Google Cloud Project and Service Account:**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a new project or select existing one
-   - Enable Google Sheets API and Google Drive API
-   - Create a Service Account at IAM & Admin > Service Accounts
-   - Download the JSON credentials file and save as `credentials.json` in the project root
-
-2. **Configure Environment Variables:**
-   - Copy the Google Sheets URL from your browser
-   - Add it to `.env` file:
-   ```
-   GOOGLE_SHEETS_URL=https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit
-   ```
-
-3. **Share Your Google Sheet:**
-   - Open the `credentials.json` file and find the `client_email` field
-   - Share your Google Sheet with this email address (Editor permission)
-
-4. **Run the Script:**
-   - The script will automatically upload to Google Sheets after saving to CSV
-   - To skip Google Sheets upload, use `--no-sheets` flag
-
 ## Dependencies
 
 The script requires:
 - `requests` - HTTP requests
 - `beautifulsoup4` - HTML parsing
-- `python-dotenv` - Environment variable management
-- `gspread` - Google Sheets API
-- `google-auth` - Google authentication
-- Standard library: `argparse`, `csv`, `json`, `re`, `urllib.parse`, `os`
+- Standard library: `argparse`, `csv`, `json`, `re`, `urllib.parse`
 
 Install with:
 ```bash
-pip3 install requests beautifulsoup4 python-dotenv gspread google-auth
+pip3 install requests beautifulsoup4
 ```
 
 ## Architecture
@@ -100,8 +64,6 @@ The scraper uses a **multi-layered parsing approach** to maximize data extractio
 - `extract_size(text)`: Regex extraction for m² measurements
 - `guess_address(lines)`: Heuristic-based address detection using Austrian location keywords
 - `parse_list_page(html, base_url)`: Main orchestrator that combines JSON-LD and HTML parsing, deduplicates by link
-- `write_csv(rows, out_path)`: Exports listings to CSV file with UTF-8 BOM encoding
-- `upload_to_google_sheets(rows, sheets_url, credentials_path)`: Uploads listings to Google Sheets, clearing existing data first
 
 ### Output Format
 

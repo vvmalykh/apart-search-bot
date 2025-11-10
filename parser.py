@@ -15,20 +15,23 @@ import logging
 import os
 import re
 import sys
+import time
 from typing import Any, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 
-import requests
 from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
+from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
 
 # Constants
 DEFAULT_OUT = "willhaben_listings.csv"
 DEFAULT_ROWS = 10000
 DEFAULT_BASE_URL = "https://www.willhaben.at"
 DEFAULT_LISTING_PATH = "/iad/immobilien/mietwohnungen/mietwohnung-angebote"
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = 30000  # 30 seconds in milliseconds for Playwright
 MIN_ADDRESS_LENGTH = 6
+SCROLL_PAUSE_TIME = 2  # seconds to wait between scrolls
+MAX_SCROLL_ATTEMPTS = 50  # maximum number of scroll attempts
 
 HEADERS = {
     "User-Agent": (
@@ -143,27 +146,104 @@ def set_rows_param(url: str, rows: Optional[int]) -> str:
     ))
 
 
-def fetch(url: str) -> str:
+def scroll_to_load_all_listings(page: Page) -> None:
     """
-    Fetch HTML content from URL.
+    Scroll page to bottom to load all dynamic listings.
+
+    Args:
+        page: Playwright Page object
+
+    Raises:
+        PlaywrightTimeoutError: If scrolling times out
+    """
+    last_height = page.evaluate("document.body.scrollHeight")
+    scroll_attempts = 0
+
+    logger.info("Starting to scroll page to load all listings...")
+
+    while scroll_attempts < MAX_SCROLL_ATTEMPTS:
+        # Scroll to bottom
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+
+        # Wait for content to load
+        time.sleep(SCROLL_PAUSE_TIME)
+
+        # Calculate new scroll height
+        new_height = page.evaluate("document.body.scrollHeight")
+
+        scroll_attempts += 1
+        logger.debug(f"Scroll attempt {scroll_attempts}: height {last_height} -> {new_height}")
+
+        # Break if no more content loaded
+        if new_height == last_height:
+            logger.info(f"Reached bottom of page after {scroll_attempts} scrolls")
+            break
+
+        last_height = new_height
+
+    if scroll_attempts >= MAX_SCROLL_ATTEMPTS:
+        logger.warning(f"Reached maximum scroll attempts ({MAX_SCROLL_ATTEMPTS})")
+
+
+def fetch(url: str, headless: bool = True) -> str:
+    """
+    Fetch HTML content from URL using Playwright with scrolling.
+
+    Uses Playwright to load the page and scrolls to bottom to load
+    all dynamically loaded listings.
 
     Args:
         url: URL to fetch
+        headless: Run browser in headless mode (default: True)
 
     Returns:
         HTML content as string
 
     Raises:
-        requests.RequestException: If request fails
+        PlaywrightTimeoutError: If page load or scrolling times out
+        Exception: If any other error occurs
     """
     try:
-        with requests.Session() as session:
-            session.headers.update(HEADERS)
-            response = session.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            logger.info(f"Successfully fetched URL: {url}")
-            return response.text
-    except requests.RequestException as e:
+        logger.info(f"Launching browser to fetch: {url}")
+
+        with sync_playwright() as playwright:
+            # Launch browser
+            browser = playwright.chromium.launch(headless=headless)
+
+            # Create context with custom user agent
+            context = browser.new_context(
+                user_agent=HEADERS["User-Agent"],
+                locale="de-DE",
+                viewport={"width": 1920, "height": 1080}
+            )
+
+            # Create page
+            page = context.new_page()
+
+            # Navigate to URL
+            logger.info("Loading page...")
+            page.goto(url, timeout=REQUEST_TIMEOUT, wait_until="networkidle")
+
+            # Wait a bit for initial content
+            page.wait_for_timeout(2000)
+
+            # Scroll to load all listings
+            scroll_to_load_all_listings(page)
+
+            # Get final HTML
+            html = page.content()
+
+            # Cleanup
+            context.close()
+            browser.close()
+
+            logger.info(f"Successfully fetched page with {len(html)} characters")
+            return html
+
+    except PlaywrightTimeoutError as e:
+        logger.error(f"Timeout while fetching URL {url}: {e}")
+        raise
+    except Exception as e:
         logger.error(f"Failed to fetch URL {url}: {e}")
         raise
 
@@ -524,6 +604,11 @@ def main() -> int:
         action="store_true",
         help="Enable verbose logging"
     )
+    parser.add_argument(
+        "--no-headless",
+        action="store_true",
+        help="Run browser in non-headless mode (visible browser)"
+    )
     args = parser.parse_args()
 
     # Set logging level
@@ -535,7 +620,7 @@ def main() -> int:
         url = set_rows_param(args.url, args.rows)
         logger.info(f"Fetching listings from: {url}")
 
-        html = fetch(url)
+        html = fetch(url, headless=not args.no_headless)
 
         # Parse and extract listings
         items = parse_list_page(html)
@@ -549,8 +634,8 @@ def main() -> int:
         print(f"✓ Parsed {len(items)} listings → {args.out}")
         return 0
 
-    except requests.RequestException as e:
-        logger.error(f"Network error: {e}")
+    except PlaywrightTimeoutError as e:
+        logger.error(f"Browser timeout: {e}")
         return 1
     except IOError as e:
         logger.error(f"File I/O error: {e}")

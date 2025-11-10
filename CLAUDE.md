@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python web scraper for Willhaben.at (Austrian real estate listings). The scraper extracts apartment rental listings from search result pages and exports them to CSV format.
+This is a Python web scraper for Willhaben.at (Austrian real estate listings). The scraper uses Playwright to load dynamic content, automatically scrolls to load all listings, and exports them to CSV format. Fully Dockerized for easy deployment.
 
 ## Configuration
 
@@ -37,40 +37,66 @@ ESTATE_SIZE_FROM=45
 
 ## Running the Script
 
-**Basic usage (uses .env configuration):**
+### Docker (Recommended)
+
+**Build and run:**
+```bash
+make build
+make run
+```
+
+**Other commands:**
+- `make run-verbose` - Run with detailed logging
+- `make shell` - Open bash shell in container
+- `make clean` - Remove image and output files
+- `make rebuild` - Clean rebuild
+
+Output saved to: `./output/willhaben_listings.csv`
+
+### Local Python
+
+**Basic usage:**
 ```bash
 python3 parser.py
 ```
 
-**With custom URL:**
+**With options:**
 ```bash
-python3 parser.py --url "https://www.willhaben.at/iad/immobilien/..."
-```
-
-**With custom output file:**
-```bash
-python3 parser.py --out my_listings.csv
-```
-
-**Override ROWS from command line:**
-```bash
-python3 parser.py --rows 100
+python3 parser.py --verbose              # Detailed logs
+python3 parser.py --no-headless          # Show browser
+python3 parser.py --rows 100             # Override ROWS
+python3 parser.py --out custom.csv       # Custom output
 ```
 
 ## Dependencies
 
 The script requires:
-- `requests` - HTTP requests
+- `playwright` - Browser automation and dynamic content loading
 - `beautifulsoup4` - HTML parsing
 - `python-dotenv` - Environment variable loading
-- Standard library: `argparse`, `csv`, `json`, `os`, `re`, `urllib.parse`
+- Standard library: `argparse`, `csv`, `json`, `logging`, `os`, `re`, `sys`, `time`, `urllib.parse`
 
 Install with:
 ```bash
-pip3 install requests beautifulsoup4 python-dotenv
+pip3 install -r requirements.txt
+playwright install chromium
+```
+
+Or use Docker (includes everything):
+```bash
+make build
 ```
 
 ## Architecture
+
+### Dynamic Content Loading
+
+The scraper uses **Playwright** for browser automation:
+- Launches headless Chromium browser
+- Navigates to search URL and waits for networkidle
+- **Scrolls to bottom** repeatedly to load all dynamically-loaded listings
+- Stops when no new content is loaded or max scroll attempts reached
+- Extracts final HTML after all content is loaded
 
 ### Data Extraction Strategy
 
@@ -89,7 +115,8 @@ The scraper uses a **multi-layered parsing approach** to maximize data extractio
 
 - `build_url_from_env()`: Constructs search URL from environment variables in `.env` file, handling both single and multi-value query parameters
 - `set_rows_param(url, rows)`: URL manipulation to control pagination (default from .env ROWS variable)
-- `fetch(url)`: HTTP request with browser-like headers to avoid blocking
+- `scroll_to_load_all_listings(page)`: Scrolls Playwright page to bottom repeatedly until all content loaded
+- `fetch(url, headless)`: Launches Playwright browser, loads URL, scrolls to load all content, returns HTML
 - `extract_id_from_href(href)`: Extracts listing IDs from URLs using two patterns: query param `?adId=` or path suffix `/123456789`
 - `extract_price(text)`: Regex extraction for euro amounts
 - `extract_size(text)`: Regex extraction for m² measurements

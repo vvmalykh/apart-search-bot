@@ -1,18 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Willhaben.at Apartment Listings Scraper
+
+Scrapes apartment rental listings from Willhaben.at and exports to CSV.
+Configuration is loaded from .env file.
+"""
+
 import argparse
 import csv
 import json
+import logging
 import os
 import re
+import sys
+from typing import Any, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 
+# Constants
 DEFAULT_OUT = "willhaben_listings.csv"
+DEFAULT_ROWS = 10000
+DEFAULT_BASE_URL = "https://www.willhaben.at"
+DEFAULT_LISTING_PATH = "/iad/immobilien/mietwohnungen/mietwohnung-angebote"
+REQUEST_TIMEOUT = 30
+MIN_ADDRESS_LENGTH = 6
 
 HEADERS = {
     "User-Agent": (
@@ -24,171 +40,290 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
+CSV_FIELDS = ["id", "listing_name", "price", "address", "apart_size", "link"]
+
+AUSTRIAN_LOCATION_PATTERNS = [
+    r"\bWien\b",
+    r"\bBezirk\b",
+    r"\bNiederösterreich\b",
+    r"\bOberösterreich\b",
+    r"\bSteiermark\b",
+    r"\bBurgenland\b",
+    r"\bSalzburg\b",
+    r"\bTirol\b",
+    r"\bVorarlberg\b",
+    r"\bKärnten\b",
+]
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 
 def build_url_from_env() -> str:
     """
     Build the Willhaben search URL from environment variables.
 
+    Reads BASE_URL, LISTING_PATH, and various query parameters from environment.
+    Multi-value parameters (AREA_IDS, etc.) should be comma-separated.
+
     Returns:
-        Complete URL with all query parameters
+        Complete URL with all query parameters.
     """
-    base_url = os.getenv("BASE_URL", "https://www.willhaben.at")
-    listing_path = os.getenv("LISTING_PATH", "/iad/immobilien/mietwohnungen/mietwohnung-angebote")
+    base_url = os.getenv("BASE_URL", DEFAULT_BASE_URL)
+    listing_path = os.getenv("LISTING_PATH", DEFAULT_LISTING_PATH)
 
-    # Build query parameters
-    params = {}
+    params: dict[str, Any] = {}
 
-    # Single value params
-    if rows := os.getenv("ROWS"):
-        params["rows"] = rows
-    if sort := os.getenv("SORT"):
-        params["sort"] = sort
-    if is_nav := os.getenv("IS_NAVIGATION"):
-        params["isNavigation"] = is_nav
-    if sf_id := os.getenv("SF_ID"):
-        params["sfId"] = sf_id
-    if page := os.getenv("PAGE"):
-        params["page"] = page
-    if price_to := os.getenv("PRICE_TO"):
-        params["PRICE_TO"] = price_to
-    if estate_size := os.getenv("ESTATE_SIZE_FROM"):
-        params["ESTATE_SIZE/LIVING_AREA_FROM"] = estate_size
+    # Single value parameters
+    single_params = {
+        "rows": "ROWS",
+        "sort": "SORT",
+        "isNavigation": "IS_NAVIGATION",
+        "sfId": "SF_ID",
+        "page": "PAGE",
+        "PRICE_TO": "PRICE_TO",
+        "ESTATE_SIZE/LIVING_AREA_FROM": "ESTATE_SIZE_FROM",
+    }
 
-    # Multi-value params (comma-separated in .env)
-    if area_ids := os.getenv("AREA_IDS"):
-        params["areaId"] = area_ids.split(",")
-    if room_buckets := os.getenv("NO_OF_ROOMS_BUCKETS"):
-        params["NO_OF_ROOMS_BUCKET"] = room_buckets.split(",")
-    if property_types := os.getenv("PROPERTY_TYPES"):
-        params["PROPERTY_TYPE"] = property_types.split(",")
+    for param_key, env_key in single_params.items():
+        if value := os.getenv(env_key):
+            params[param_key] = value
 
-    # Build URL
+    # Multi-value parameters (comma-separated in .env)
+    multi_params = {
+        "areaId": "AREA_IDS",
+        "NO_OF_ROOMS_BUCKET": "NO_OF_ROOMS_BUCKETS",
+        "PROPERTY_TYPE": "PROPERTY_TYPES",
+    }
+
+    for param_key, env_key in multi_params.items():
+        if value := os.getenv(env_key):
+            params[param_key] = [v.strip() for v in value.split(",")]
+
     query_string = urlencode(params, doseq=True)
     return f"{base_url}{listing_path}?{query_string}"
 
 
-def set_rows_param(url: str, rows: int | None) -> str:
+def set_rows_param(url: str, rows: Optional[int]) -> str:
     """
-Вставляет/обновляет query-параметр rows.
-Если rows=None: если rows уже есть в URL — оставляем как есть, иначе ставим 10000.
-Если rows задан — принудительно выставляем его.
+    Insert or update the 'rows' query parameter in URL.
+
+    If rows is None and URL doesn't have 'rows', sets it to DEFAULT_ROWS.
+    If rows is provided, overwrites existing value.
+
+    Args:
+        url: URL to modify
+        rows: Number of rows to set, or None to keep/set default
+
+    Returns:
+        Modified URL with rows parameter
     """
-    pr = urlparse(url)
-    q = parse_qs(pr.query, keep_blank_values=True)
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query, keep_blank_values=True)
 
     if rows is None:
-        if "rows" not in q:
-            q["rows"] = [str(DEFAULT_ROWS)]
+        if "rows" not in query_params:
+            query_params["rows"] = [str(DEFAULT_ROWS)]
     else:
-        q["rows"] = [str(rows)]
+        query_params["rows"] = [str(rows)]
 
-    new_query = urlencode(q, doseq=True)
-    return urlunparse((pr.scheme, pr.netloc, pr.path, pr.params, new_query, pr.fragment))
+    new_query = urlencode(query_params, doseq=True)
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        new_query,
+        parsed.fragment
+    ))
 
 
 def fetch(url: str) -> str:
-    with requests.Session() as s:
-        s.headers.update(HEADERS)
-        resp = s.get(url, timeout=30)
-        resp.raise_for_status()
-        return resp.text
+    """
+    Fetch HTML content from URL.
+
+    Args:
+        url: URL to fetch
+
+    Returns:
+        HTML content as string
+
+    Raises:
+        requests.RequestException: If request fails
+    """
+    try:
+        with requests.Session() as session:
+            session.headers.update(HEADERS)
+            response = session.get(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            logger.info(f"Successfully fetched URL: {url}")
+            return response.text
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch URL {url}: {e}")
+        raise
 
 
-def normalize_space(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
+def normalize_space(text: str) -> str:
+    """
+    Normalize whitespace in text.
+
+    Replaces multiple whitespace characters with single space and strips.
+
+    Args:
+        text: Text to normalize
+
+    Returns:
+        Normalized text
+    """
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
-def extract_id_from_href(href: str) -> str | None:
-    # Пытаемся вытащить id из параметра ?adId=123456789
-    m = re.search(r"[?&]adId=(\d+)", href)
-    if m:
-        return m.group(1)
+def extract_id_from_href(href: str) -> Optional[str]:
+    """
+    Extract listing ID from href.
 
-    # Иногда id в конце пути /.../123456789
-    m = re.search(r"/(\d{6,})/?$", href)
-    if m:
-        return m.group(1)
+    Tries two patterns:
+    1. Query parameter: ?adId=123456789
+    2. Path suffix: /.../123456789
+
+    Args:
+        href: URL or path to extract ID from
+
+    Returns:
+        Listing ID if found, None otherwise
+    """
+    # Try query parameter pattern
+    match = re.search(r"[?&]adId=(\d+)", href)
+    if match:
+        return match.group(1)
+
+    # Try path suffix pattern (at least 6 digits)
+    match = re.search(r"/(\d{6,})/?$", href)
+    if match:
+        return match.group(1)
 
     return None
 
 
-def extract_price(text: str) -> str | None:
-    # Первая сумма с символом евро
-    m = re.search(r"\b[\d.\s]+(?:,\d{2})?\s*€", text)
-    if m:
-        return normalize_space(m.group(0))
+def extract_price(text: str) -> Optional[str]:
+    """
+    Extract price from text.
+
+    Finds first occurrence of price with euro symbol.
+
+    Args:
+        text: Text to search
+
+    Returns:
+        Normalized price string if found, None otherwise
+    """
+    match = re.search(r"\b[\d.\s]+(?:,\d{2})?\s*€", text)
+    if match:
+        return normalize_space(match.group(0))
     return None
 
 
-def extract_size(text: str) -> str | None:
-    # Первая площадь с м²
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*m²", text, flags=re.IGNORECASE)
-    if m:
-        # Возвращаем как "XX m²"
-        return f"{m.group(1).replace(',', '.') } m²"
+def extract_size(text: str) -> Optional[str]:
+    """
+    Extract apartment size from text.
+
+    Finds first occurrence of size with m² unit.
+
+    Args:
+        text: Text to search
+
+    Returns:
+        Normalized size string (e.g., "50 m²") if found, None otherwise
+    """
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*m²", text, flags=re.IGNORECASE)
+    if match:
+        size_value = match.group(1).replace(',', '.')
+        return f"{size_value} m²"
     return None
 
 
-def guess_address(lines: list[str]) -> str | None:
+def guess_address(lines: list[str]) -> Optional[str]:
     """
-Ищем строку, похожую на адрес/локацию.
-Эвристики: содержит "Wien", "Bezirk", названия земель.
+    Guess address/location from text lines using heuristics.
+
+    First tries to find lines containing Austrian location keywords.
+    Falls back to finding informative lines without common listing metadata.
+
+    Args:
+        lines: List of text lines to search
+
+    Returns:
+        Best guess for address if found, None otherwise
     """
-    patterns = [
-        r"\bWien\b",
-        r"\bBezirk\b",
-        r"\bNiederösterreich\b",
-        r"\bOberösterreich\b",
-        r"\bSteiermark\b",
-        r"\bBurgenland\b",
-        r"\bSalzburg\b",
-        r"\bTirol\b",
-        r"\bVorarlberg\b",
-        r"\bKärnten\b",
-    ]
-    for ln in lines:
-        if any(re.search(pat, ln, flags=re.IGNORECASE) for pat in patterns):
-            return ln
-    # fallback — просто вторая или третья информативная строка
-    for ln in lines:
-        if len(ln) >= 6 and not re.search(r"€|m²|Zimmer|Gesamtmiete|Kaution|Betriebskosten", ln, re.I):
-            return ln
+    # Try location patterns first
+    for line in lines:
+        if any(re.search(pat, line, flags=re.IGNORECASE) for pat in AUSTRIAN_LOCATION_PATTERNS):
+            return line
+
+    # Fallback: find informative line without metadata
+    metadata_pattern = re.compile(r"€|m²|Zimmer|Gesamtmiete|Kaution|Betriebskosten", re.IGNORECASE)
+    for line in lines:
+        if len(line) >= MIN_ADDRESS_LENGTH and not metadata_pattern.search(line):
+            return line
+
     return None
 
 
-def extract_by_card(container, base_url: str) -> dict | None:
+def extract_by_card(container: Tag, base_url: str) -> Optional[dict[str, str]]:
     """
-Извлекаем данные внутри карточки.
+    Extract listing data from HTML card container.
+
+    Args:
+        container: BeautifulSoup Tag containing listing card
+        base_url: Base URL for resolving relative links
+
+    Returns:
+        Dictionary with listing fields, or None if extraction fails
     """
-    # Ссылка и заголовок
-    a = container.find("a", href=True)
-    if not a:
+    # Find link and title
+    anchor = container.find("a", href=True)
+    if not anchor:
         return None
-    href = a["href"]
+
+    href = anchor["href"]
     link = urljoin(base_url, href)
-    listing_name = normalize_space(a.get_text(" ", strip=True))
+    listing_name = normalize_space(anchor.get_text(" ", strip=True))
 
-    # Полный текст карточки строками
+    # Get full card text
     text = normalize_space(container.get_text(" ", strip=True))
-    lines = [normalize_space(x) for x in re.split(r"[•\n\r]+| {2,}", text) if normalize_space(x)]
+    lines = [
+        normalize_space(line)
+        for line in re.split(r"[•\n\r]+| {2,}", text)
+        if normalize_space(line)
+    ]
 
+    # Extract structured data
     price = extract_price(text)
     apart_size = extract_size(text)
 
-    # Адрес: пробы через явные классы
+    # Try to find address from CSS classes first
     address = None
-    for cls_pat in [r"address", r"location", r"region"]:
-        el = container.find(True, class_=re.compile(cls_pat, re.I))
-        if el:
-            address = normalize_space(el.get_text(" ", strip=True))
+    address_class_patterns = [r"address", r"location", r"region"]
+    for pattern in address_class_patterns:
+        element = container.find(True, class_=re.compile(pattern, re.IGNORECASE))
+        if element:
+            address = normalize_space(element.get_text(" ", strip=True))
             break
+
+    # Fallback to heuristic address detection
     if not address:
         address = guess_address(lines)
 
-    # ID: из href или из data-атрибутов
+    # Extract ID from href or data attributes
     ad_id = extract_id_from_href(href)
     if not ad_id:
-        for attr in ["data-id", "data-adid", "data-item-id", "data-tracking-id"]:
+        data_attrs = ["data-id", "data-adid", "data-item-id", "data-tracking-id"]
+        for attr in data_attrs:
             if container.has_attr(attr):
                 ad_id = container.get(attr)
                 break
@@ -203,115 +338,227 @@ def extract_by_card(container, base_url: str) -> dict | None:
     }
 
 
-def extract_from_jsonld(soup: BeautifulSoup, base_url: str) -> dict[str, dict]:
+def extract_from_jsonld(soup: BeautifulSoup, base_url: str) -> dict[str, dict[str, str]]:
     """
-Пробуем достать имена/ссылки из JSON-LD (ItemList/ListItem).
-Возвращаем словарь по ссылке.
+    Extract listing names and URLs from JSON-LD structured data.
+
+    Looks for ItemList schemas in <script type="application/ld+json"> tags.
+
+    Args:
+        soup: BeautifulSoup object of the page
+        base_url: Base URL for resolving relative links
+
+    Returns:
+        Dictionary mapping full URLs to listing data
     """
-    items_by_link = {}
+    items_by_link: dict[str, dict[str, str]] = {}
     scripts = soup.find_all("script", attrs={"type": "application/ld+json"})
-    for sc in scripts:
+
+    for script in scripts:
         try:
-            data = json.loads(sc.string or "")
-        except Exception:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.debug(f"Failed to parse JSON-LD: {e}")
             continue
 
+        # Handle both single objects and arrays
         payloads = data if isinstance(data, list) else [data]
-        for d in payloads:
-            if not isinstance(d, dict):
+
+        for payload in payloads:
+            if not isinstance(payload, dict):
                 continue
-            if d.get("@type") == "ItemList" and "itemListElement" in d:
-                for li in d["itemListElement"]:
-                    # варианты: {"@type":"ListItem","position":1,"url":"...","name":"..."}
-                    # или {"@type":"ListItem","item":{"@id":"...","name":"...","url":"..."}}
-                    url = None
-                    name = None
-                    if isinstance(li, dict):
-                        if "url" in li:
-                            url = li["url"]
-                        item = li.get("item")
-                        if isinstance(item, dict):
-                            url = url or item.get("url") or item.get("@id")
-                            name = item.get("name")
-                        name = name or li.get("name")
+
+            if payload.get("@type") == "ItemList" and "itemListElement" in payload:
+                for list_item in payload["itemListElement"]:
+                    if not isinstance(list_item, dict):
+                        continue
+
+                    # Extract URL and name from different schema structures
+                    url = list_item.get("url")
+                    name = list_item.get("name")
+
+                    # Check nested item object
+                    if item_obj := list_item.get("item"):
+                        if isinstance(item_obj, dict):
+                            url = url or item_obj.get("url") or item_obj.get("@id")
+                            name = name or item_obj.get("name")
+
                     if url:
-                        full = urljoin(base_url, url)
-                        items_by_link[full] = {"listing_name": normalize_space(name or "")}
+                        full_url = urljoin(base_url, url)
+                        items_by_link[full_url] = {
+                            "listing_name": normalize_space(name or "")
+                        }
+
     return items_by_link
 
 
-def parse_list_page(html: str, base_url: str = "https://www.willhaben.at") -> list[dict]:
+def parse_list_page(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str, str]]:
+    """
+    Parse Willhaben listing page HTML.
+
+    Uses multi-layered approach:
+    1. Extract structured data from JSON-LD
+    2. Find listing cards via anchor links
+    3. Extract data from each card
+    4. Merge with JSON-LD data and deduplicate
+
+    Args:
+        html: HTML content of the page
+        base_url: Base URL for resolving relative links
+
+    Returns:
+        List of listing dictionaries
+    """
     soup = BeautifulSoup(html, "html.parser")
 
-    # Попытка укрепить title по JSON-LD (если есть)
+    # Extract titles from JSON-LD structured data
     jsonld_titles = extract_from_jsonld(soup, base_url)
+    logger.debug(f"Found {len(jsonld_titles)} items in JSON-LD")
 
-    # Находим все карточки по якорям со ссылками на детали
-    anchors = soup.find_all("a", href=re.compile(r"^/iad/immobilien/(?:d/|.*\?adId=)"))
-    seen_links = set()
-    results = []
+    # Find all listing links
+    listing_link_pattern = re.compile(r"^/iad/immobilien/(?:d/|.*\?adId=)")
+    anchors = soup.find_all("a", href=listing_link_pattern)
+    logger.debug(f"Found {len(anchors)} listing anchors")
 
-    for a in anchors:
-        link = urljoin(base_url, a.get("href", ""))
+    seen_links: set[str] = set()
+    results: list[dict[str, str]] = []
+
+    for anchor in anchors:
+        link = urljoin(base_url, anchor.get("href", ""))
         if link in seen_links:
             continue
         seen_links.add(link)
 
-        # Ищем разумный контейнер карточки
+        # Find card container
         container = (
-            a.find_parent("article")
-            or a.find_parent("li")
-            or a.find_parent("div", class_=re.compile(r"(result|card|box|tile)", re.I))
-            or a.parent
+            anchor.find_parent("article")
+            or anchor.find_parent("li")
+            or anchor.find_parent("div", class_=re.compile(r"(result|card|box|tile)", re.IGNORECASE))
+            or anchor.parent
         )
+
         item = extract_by_card(container, base_url)
         if not item:
             continue
 
-        # Если name пустоват — подставим из JSON-LD
-        if (not item.get("listing_name")) and (link in jsonld_titles):
+        # Enhance with JSON-LD title if available and current title is empty
+        if not item.get("listing_name") and link in jsonld_titles:
             item["listing_name"] = jsonld_titles[link].get("listing_name", "")
 
         results.append(item)
 
-    # Фильтруем мусор: хотя бы ссылка и (id или title)
-    filtered = [r for r in results if r.get("link") and (r.get("id") or r.get("listing_name"))]
-    # Дедуп по ссылке
-    uniq = {}
-    for r in filtered:
-        uniq[r["link"]] = r
-    return list(uniq.values())
+    # Filter out invalid items (must have link and either ID or title)
+    filtered = [
+        item for item in results
+        if item.get("link") and (item.get("id") or item.get("listing_name"))
+    ]
+
+    # Deduplicate by link
+    unique_items: dict[str, dict[str, str]] = {}
+    for item in filtered:
+        unique_items[item["link"]] = item
+
+    logger.info(f"Parsed {len(unique_items)} unique listings")
+    return list(unique_items.values())
 
 
-def write_csv(rows: list[dict], out_path: str):
-    fields = ["id", "listing_name", "price", "address", "apart_size", "link"]
-    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in fields})
+def write_csv(rows: list[dict[str, str]], out_path: str) -> None:
+    """
+    Write listing data to CSV file.
+
+    Args:
+        rows: List of listing dictionaries
+        out_path: Path to output CSV file
+
+    Raises:
+        IOError: If file cannot be written
+    """
+    try:
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({field: row.get(field, "") for field in CSV_FIELDS})
+        logger.info(f"Wrote {len(rows)} listings to {out_path}")
+    except IOError as e:
+        logger.error(f"Failed to write CSV file {out_path}: {e}")
+        raise
 
 
-def main():
-    # Load environment variables from .env file
+def main() -> int:
+    """
+    Main entry point for the scraper.
+
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    # Load environment variables
     load_dotenv()
 
-    # Build default URL from environment variables
+    # Build default URL from environment
     default_url = build_url_from_env()
 
-    ap = argparse.ArgumentParser(description="Parse Willhaben list page into CSV.")
-    ap.add_argument("--url", default=default_url, help="URL страницы списка Willhaben")
-    ap.add_argument("--rows", type=int, default=None, help="Значение параметра &rows= (переопределяет значение из .env)")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="Путь к выходному CSV")
-    args = ap.parse_args()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Parse Willhaben listing page into CSV.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--url",
+        default=default_url,
+        help="Willhaben search URL (default: built from .env)"
+    )
+    parser.add_argument(
+        "--rows",
+        type=int,
+        default=None,
+        help="Number of results per page (overrides .env ROWS)"
+    )
+    parser.add_argument(
+        "--out",
+        default=DEFAULT_OUT,
+        help=f"Output CSV file path (default: {DEFAULT_OUT})"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging"
+    )
+    args = parser.parse_args()
 
-    url = set_rows_param(args.url, args.rows)
-    html = fetch(url)
-    items = parse_list_page(html)
-    write_csv(items, args.out)
-    print(f"Parsed {len(items)} listings -> {args.out}")
+    # Set logging level
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+
+    try:
+        # Build URL and fetch
+        url = set_rows_param(args.url, args.rows)
+        logger.info(f"Fetching listings from: {url}")
+
+        html = fetch(url)
+
+        # Parse and extract listings
+        items = parse_list_page(html)
+
+        if not items:
+            logger.warning("No listings found")
+            return 1
+
+        # Write to CSV
+        write_csv(items, args.out)
+        print(f"✓ Parsed {len(items)} listings → {args.out}")
+        return 0
+
+    except requests.RequestException as e:
+        logger.error(f"Network error: {e}")
+        return 1
+    except IOError as e:
+        logger.error(f"File I/O error: {e}")
+        return 1
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
-    
+    sys.exit(main())

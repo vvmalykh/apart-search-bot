@@ -69,14 +69,37 @@ PROPERTY_TYPES=110,102,3
 PAGE=1
 PRICE_TO=2000
 ESTATE_SIZE_FROM=45
+
+# Scraper Settings (optional - defaults shown)
+REQUEST_TIMEOUT=30000
+MAX_SCROLL_ATTEMPTS=100
+INITIAL_CONTENT_WAIT=2000
+SCROLL_WAIT_SHORT=300
+SCROLL_WAIT_LONG=1500
+SCROLL_LONG_WAIT_FREQUENCY=10
+SCROLL_STALE_THRESHOLD=5
 ```
 
 **Configuration Guide:**
+
+*Search Filters:*
 - `ROWS` - Results per page (max 10000)
 - `AREA_IDS` - Vienna district codes
 - `NO_OF_ROOMS_BUCKETS` - 2X2=2 rooms, 3X3=3 rooms, etc.
 - `PRICE_TO` - Maximum monthly rent
 - `ESTATE_SIZE_FROM` - Minimum apartment size in m²
+
+*Scraper Settings:*
+- `REQUEST_TIMEOUT` - Page load timeout in milliseconds (default: 30000)
+- `MIN_ADDRESS_LENGTH` - Minimum address length for validation (default: 6)
+- `MAX_SCROLL_ATTEMPTS` - Maximum scroll attempts before giving up (default: 100)
+- `INITIAL_CONTENT_WAIT` - Wait time for initial page content in ms (default: 2000)
+- `SCROLL_WAIT_SHORT` - Short wait between scrolls in ms (default: 300)
+- `SCROLL_WAIT_LONG` - Long wait every N scrolls in ms (default: 1500)
+- `SCROLL_LONG_WAIT_FREQUENCY` - How often to do long wait (default: 10)
+- `SCROLL_LOG_FREQUENCY` - How often to log scroll progress (default: 5)
+- `SCROLL_WAIT_FINAL` - Final wait after scrolling to bottom in ms (default: 2000)
+- `SCROLL_STALE_THRESHOLD` - Scrolls with no change before stopping (default: 5)
 
 ## Local Installation (Without Docker)
 

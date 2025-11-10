@@ -23,15 +23,28 @@ from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
 
+# Load environment variables
+load_dotenv()
+
 # Constants
 DEFAULT_OUT = "willhaben_listings.csv"
 DEFAULT_ROWS = 10000
 DEFAULT_BASE_URL = "https://www.willhaben.at"
 DEFAULT_LISTING_PATH = "/iad/immobilien/mietwohnungen/mietwohnung-angebote"
-REQUEST_TIMEOUT = 30000  # 30 seconds in milliseconds for Playwright
-MIN_ADDRESS_LENGTH = 6
-SCROLL_PAUSE_TIME = 2  # seconds to wait between scrolls
-MAX_SCROLL_ATTEMPTS = 50  # maximum number of scroll attempts
+
+# Scraper settings from environment
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30000"))
+MIN_ADDRESS_LENGTH = int(os.getenv("MIN_ADDRESS_LENGTH", "6"))
+MAX_SCROLL_ATTEMPTS = int(os.getenv("MAX_SCROLL_ATTEMPTS", "100"))
+
+# Scroll timing settings from environment (all in milliseconds)
+INITIAL_CONTENT_WAIT = int(os.getenv("INITIAL_CONTENT_WAIT", "2000"))
+SCROLL_WAIT_SHORT = int(os.getenv("SCROLL_WAIT_SHORT", "300"))
+SCROLL_WAIT_LONG = int(os.getenv("SCROLL_WAIT_LONG", "1500"))
+SCROLL_LONG_WAIT_FREQUENCY = int(os.getenv("SCROLL_LONG_WAIT_FREQUENCY", "10"))
+SCROLL_LOG_FREQUENCY = int(os.getenv("SCROLL_LOG_FREQUENCY", "5"))
+SCROLL_WAIT_FINAL = int(os.getenv("SCROLL_WAIT_FINAL", "2000"))
+SCROLL_STALE_THRESHOLD = int(os.getenv("SCROLL_STALE_THRESHOLD", "5"))
 
 HEADERS = {
     "User-Agent": (
@@ -148,7 +161,10 @@ def set_rows_param(url: str, rows: Optional[int]) -> str:
 
 def scroll_to_load_all_listings(page: Page) -> None:
     """
-    Scroll page to bottom to load all dynamic listings.
+    Scroll page to bottom to load all listings and images.
+
+    The page contains all listings in HTML already, but needs scrolling
+    to expand the page height and trigger image lazy-loading.
 
     Args:
         page: Playwright Page object
@@ -156,30 +172,55 @@ def scroll_to_load_all_listings(page: Page) -> None:
     Raises:
         PlaywrightTimeoutError: If scrolling times out
     """
-    last_height = page.evaluate("document.body.scrollHeight")
-    scroll_attempts = 0
-
     logger.info("Starting to scroll page to load all listings...")
 
+    last_height = page.evaluate("document.body.scrollHeight")
+    scroll_attempts = 0
+    no_change_count = 0
+
     while scroll_attempts < MAX_SCROLL_ATTEMPTS:
-        # Scroll to bottom
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        # Scroll down by one viewport height
+        page.evaluate("window.scrollBy(0, window.innerHeight)")
 
-        # Wait for content to load
-        time.sleep(SCROLL_PAUSE_TIME)
+        # Wait for dynamic content - longer wait every N scrolls
+        if scroll_attempts % SCROLL_LONG_WAIT_FREQUENCY == 0:
+            page.wait_for_timeout(SCROLL_WAIT_LONG)
+        else:
+            page.wait_for_timeout(SCROLL_WAIT_SHORT)
 
-        # Calculate new scroll height
+        # Get new scroll height
         new_height = page.evaluate("document.body.scrollHeight")
 
         scroll_attempts += 1
-        logger.debug(f"Scroll attempt {scroll_attempts}: height {last_height} -> {new_height}")
 
-        # Break if no more content loaded
-        if new_height == last_height:
-            logger.info(f"Reached bottom of page after {scroll_attempts} scrolls")
-            break
+        # Check if page height changed
+        if new_height > last_height:
+            if scroll_attempts % SCROLL_LOG_FREQUENCY == 0:  # Log less frequently
+                logger.debug(f"Scroll {scroll_attempts}: Page height: {new_height}px")
+            last_height = new_height
+            no_change_count = 0
+        else:
+            no_change_count += 1
 
-        last_height = new_height
+            # If height hasn't changed for N scrolls, try one final big scroll to bottom
+            if no_change_count >= SCROLL_STALE_THRESHOLD:
+                logger.debug(f"No change for {no_change_count} scrolls, doing final scroll to bottom...")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(SCROLL_WAIT_FINAL)
+
+                # Check one more time
+                final_height = page.evaluate("document.body.scrollHeight")
+                if final_height == last_height:
+                    logger.info(f"Reached bottom after {scroll_attempts} scrolls. Final height: {final_height}px")
+                    break
+                else:
+                    logger.debug(f"Page expanded to {final_height}px after final scroll, continuing...")
+                    last_height = final_height
+                    no_change_count = 0
+
+    # Count total listings found
+    listing_count = page.evaluate('document.querySelectorAll(\'a[href*="/iad/immobilien/d/"]\').length')
+    logger.info(f"Total listing links found on page: {listing_count}")
 
     if scroll_attempts >= MAX_SCROLL_ATTEMPTS:
         logger.warning(f"Reached maximum scroll attempts ({MAX_SCROLL_ATTEMPTS})")
@@ -224,8 +265,8 @@ def fetch(url: str, headless: bool = True) -> str:
             logger.info("Loading page...")
             page.goto(url, timeout=REQUEST_TIMEOUT, wait_until="networkidle")
 
-            # Wait a bit for initial content
-            page.wait_for_timeout(2000)
+            # Wait for initial content to load
+            page.wait_for_timeout(INITIAL_CONTENT_WAIT)
 
             # Scroll to load all listings
             scroll_to_load_all_listings(page)
@@ -294,7 +335,7 @@ def extract_price(text: str) -> Optional[str]:
     """
     Extract price from text.
 
-    Finds first occurrence of price with euro symbol.
+    Supports both Austrian format (€ 1.000) and alternative format (1000€).
 
     Args:
         text: Text to search
@@ -302,9 +343,20 @@ def extract_price(text: str) -> Optional[str]:
     Returns:
         Normalized price string if found, None otherwise
     """
-    match = re.search(r"\b[\d.\s]+(?:,\d{2})?\s*€", text)
+    # Try Austrian/German format: € 1.000 or € 1.000,50
+    # Match only digits, dots, spaces, and optional comma with 2 digits
+    # Use negative lookahead to stop before 4-digit postal codes
+    match = re.search(r"€\s*((?:[\d.\s]+?)(?:,\d{2})?)(?=\s+\d{4}(?:\s|$)|[^\d,.\s]|$)", text)
     if match:
-        return normalize_space(match.group(0))
+        # Extract and clean the number part
+        price_num = normalize_space(match.group(1))
+        return f"€ {price_num}"
+
+    # Fallback: try alternative format 1000€
+    match = re.search(r"\b([\d.\s]+(?:,\d{2})?)\s*€", text)
+    if match:
+        return f"{normalize_space(match.group(1))} €"
+
     return None
 
 
@@ -327,6 +379,81 @@ def extract_size(text: str) -> Optional[str]:
     return None
 
 
+def clean_listing_name(name: str) -> str:
+    """
+    Clean listing name by removing metadata.
+
+    Removes address, size, price, room count, and company names that
+    sometimes get included in the listing title.
+
+    Args:
+        name: Raw listing name
+
+    Returns:
+        Cleaned listing name
+    """
+    # Remove Austrian postal code + address (but only when followed by district/Wien)
+    # This removes: "1190 Wien, 19. Bezirk, Döbling" but keeps numbers in titles
+    name = re.sub(r'\s+\d{4}\s+Wien,\s+\d+\.\s+Bezirk[^€]*', '', name)
+
+    # Remove size with m² (e.g., "64 m²")
+    name = re.sub(r'\s+\d+(?:[.,]\d+)?\s*m²', '', name)
+
+    # Remove price (e.g., "€ 1.735" or "€1.735" without space)
+    name = re.sub(r'\s*€\s*[\d.\s,]+', '', name)
+
+    # Remove isolated room count numbers followed by "Zimmer" (e.g., "3 Zimmer")
+    # But don't remove from titles like "2-Zimmer Wohnung"
+    name = re.sub(r'\s+\d+\s+Zimmer(?!\w)', '', name)
+
+    # Remove trailing property features (only at the end to avoid removing from titles)
+    name = re.sub(r'\s+(Balkon|Loggia|Terrasse|Garten)\s*$', '', name, flags=re.IGNORECASE)
+
+    # Remove company names at the end (with GmbH, OG, etc.)
+    name = re.sub(r'\s+(?:Blueground|Hubner|EHL|OPTIN|KALANDRA|Mayrhofer|MP|EDEX|Mittelsmann|Zirkel)\s+(?:Austria\s+)?(?:GmbH|OG|KG|AG|Immobilien)?\s*$', '', name, flags=re.IGNORECASE)
+
+    # Remove standalone trailing company suffixes
+    name = re.sub(r'\s+(?:GmbH|OG|KG|AG|Immobilien|Privat)\s*$', '', name, flags=re.IGNORECASE)
+
+    # Remove trailing street names (e.g., ", Gerlgasse")
+    name = re.sub(r',\s+[A-ZÄÖÜ][a-zäöüß]+(?:straße|gasse|platz|weg)\s*$', '', name, flags=re.IGNORECASE)
+
+    # Clean up multiple spaces
+    name = normalize_space(name)
+
+    # Remove trailing/leading commas and extra spaces
+    name = re.sub(r'^[,\s]+|[,\s]+$', '', name)
+
+    return name
+
+
+def extract_address_from_text(text: str) -> Optional[str]:
+    """
+    Extract address from text using pattern matching.
+
+    Looks for Austrian address format: postal code + city/district.
+    Example: "1190 Wien, 19. Bezirk, Döbling"
+
+    Args:
+        text: Text to search
+
+    Returns:
+        Extracted address if found, None otherwise
+    """
+    # Pattern for Austrian addresses: 4-digit postal code followed by location
+    # Matches: "1190 Wien, 19. Bezirk, Döbling" or "1030 Wien, 03. Bezirk, Landstraße"
+    match = re.search(r"\b\d{4}\s+[A-ZÄÖÜa-zäöüß][^€]+?(?:Bezirk|[A-ZÄÖÜ][a-zäöüß]+)(?:,\s*[^€\d]+)?", text)
+    if match:
+        address = match.group(0)
+        # Clean up: remove trailing metadata
+        address = re.sub(r'\s*\d+\s*m².*$', '', address)  # Remove size and everything after
+        address = re.sub(r'\s*€.*$', '', address)  # Remove price and everything after
+        address = re.sub(r'\s*\d+\s*Zimmer.*$', '', address)  # Remove room count
+        return normalize_space(address)
+
+    return None
+
+
 def guess_address(lines: list[str]) -> Optional[str]:
     """
     Guess address/location from text lines using heuristics.
@@ -343,6 +470,10 @@ def guess_address(lines: list[str]) -> Optional[str]:
     # Try location patterns first
     for line in lines:
         if any(re.search(pat, line, flags=re.IGNORECASE) for pat in AUSTRIAN_LOCATION_PATTERNS):
+            # Try to extract clean address from the line
+            clean_addr = extract_address_from_text(line)
+            if clean_addr:
+                return clean_addr
             return line
 
     # Fallback: find informative line without metadata
@@ -372,10 +503,13 @@ def extract_by_card(container: Tag, base_url: str) -> Optional[dict[str, str]]:
 
     href = anchor["href"]
     link = urljoin(base_url, href)
-    listing_name = normalize_space(anchor.get_text(" ", strip=True))
+    raw_listing_name = normalize_space(anchor.get_text(" ", strip=True))
 
     # Get full card text
     text = normalize_space(container.get_text(" ", strip=True))
+
+    # Clean listing name from metadata
+    listing_name = clean_listing_name(raw_listing_name)
     lines = [
         normalize_space(line)
         for line in re.split(r"[•\n\r]+| {2,}", text)
@@ -386,14 +520,18 @@ def extract_by_card(container: Tag, base_url: str) -> Optional[dict[str, str]]:
     price = extract_price(text)
     apart_size = extract_size(text)
 
-    # Try to find address from CSS classes first
-    address = None
-    address_class_patterns = [r"address", r"location", r"region"]
-    for pattern in address_class_patterns:
-        element = container.find(True, class_=re.compile(pattern, re.IGNORECASE))
-        if element:
-            address = normalize_space(element.get_text(" ", strip=True))
-            break
+    # Try to extract address from full card text first
+    address = extract_address_from_text(text)
+
+    # If not found, try CSS classes
+    if not address:
+        address_class_patterns = [r"address", r"location", r"region"]
+        for pattern in address_class_patterns:
+            element = container.find(True, class_=re.compile(pattern, re.IGNORECASE))
+            if element:
+                elem_text = normalize_space(element.get_text(" ", strip=True))
+                address = extract_address_from_text(elem_text) or elem_text
+                break
 
     # Fallback to heuristic address detection
     if not address:
@@ -495,8 +633,9 @@ def parse_list_page(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[st
     jsonld_titles = extract_from_jsonld(soup, base_url)
     logger.debug(f"Found {len(jsonld_titles)} items in JSON-LD")
 
-    # Find all listing links
-    listing_link_pattern = re.compile(r"^/iad/immobilien/(?:d/|.*\?adId=)")
+    # Find all listing links with broader pattern
+    # Matches any link containing /iad/immobilien/
+    listing_link_pattern = re.compile(r"/iad/immobilien/")
     anchors = soup.find_all("a", href=listing_link_pattern)
     logger.debug(f"Found {len(anchors)} listing anchors")
 
@@ -504,9 +643,18 @@ def parse_list_page(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[st
     results: list[dict[str, str]] = []
 
     for anchor in anchors:
-        link = urljoin(base_url, anchor.get("href", ""))
+        href = anchor.get("href", "")
+        link = urljoin(base_url, href)
+
+        # Skip if already seen
         if link in seen_links:
             continue
+
+        # Filter: Only process links that are actual listing detail pages
+        # Valid listing URLs contain /d/ in the path (detail pages)
+        if "/d/" not in href and "?adId=" not in href:
+            continue
+
         seen_links.add(link)
 
         # Find card container
@@ -516,6 +664,23 @@ def parse_list_page(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[st
             or anchor.find_parent("div", class_=re.compile(r"(result|card|box|tile)", re.IGNORECASE))
             or anchor.parent
         )
+
+        # Skip TOP-ANZEIGEN (promoted/featured listings)
+        if container:
+            # Check for promoted listing indicators
+            container_text = container.get_text(" ", strip=True)
+            container_classes = " ".join(container.get("class", [])).lower()
+
+            # Skip if marked as top ad/promoted/featured
+            promoted_keywords = ["top-anzeige", "topanzeige", "promoted", "featured", "sponsored", "premium"]
+            if any(keyword in container_classes for keyword in promoted_keywords):
+                logger.debug(f"Skipping promoted listing: {link}")
+                continue
+
+            # Skip if text contains TOP-ANZEIGEN marker
+            if re.search(r"TOP[- ]ANZEIGEN?", container_text, re.IGNORECASE):
+                logger.debug(f"Skipping TOP-ANZEIGEN listing: {link}")
+                continue
 
         item = extract_by_card(container, base_url)
         if not item:
@@ -572,9 +737,6 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for failure)
     """
-    # Load environment variables
-    load_dotenv()
-
     # Build default URL from environment
     default_url = build_url_from_env()
 

@@ -4,11 +4,15 @@
 import argparse
 import csv
 import json
+import os
 import re
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+import gspread
+from google.oauth2.service_account import Credentials
 
 DEFAULT_ROWS = 10000
 DEFAULT_OUT = "willhaben_listings.csv"
@@ -256,11 +260,57 @@ def write_csv(rows: list[dict], out_path: str):
             w.writerow({k: r.get(k, "") for k in fields})
 
 
+def upload_to_google_sheets(rows: list[dict], sheets_url: str, credentials_path: str):
+    """
+    Upload data to Google Sheets.
+
+    Args:
+        rows: List of dictionaries with listing data
+        sheets_url: URL of the Google Sheets document
+        credentials_path: Path to Google service account JSON credentials
+    """
+    # Define the scope
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+
+    # Authenticate using service account
+    creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    # Open the spreadsheet by URL
+    spreadsheet = client.open_by_url(sheets_url)
+
+    # Get the first worksheet (or create one if needed)
+    try:
+        worksheet = spreadsheet.sheet1
+    except Exception:
+        worksheet = spreadsheet.add_worksheet(title="Listings", rows=1000, cols=6)
+
+    # Prepare data for upload
+    fields = ["id", "listing_name", "price", "address", "apart_size", "link"]
+    data = [fields]  # Header row
+    for r in rows:
+        data.append([r.get(k, "") for k in fields])
+
+    # Clear existing data and upload new data
+    worksheet.clear()
+    worksheet.update(data, range_name='A1')
+
+    print(f"Uploaded {len(rows)} listings to Google Sheets")
+
+
 def main():
+    # Load environment variables from .env file
+    load_dotenv()
+
     ap = argparse.ArgumentParser(description="Parse Willhaben list page into CSV.")
     ap.add_argument("--url", default=DEFAULT_URL, help="URL страницы списка Willhaben")
     ap.add_argument("--rows", type=int, default=None, help="Значение параметра &rows= (по умолчанию 10000, если не указано и нет в URL)")
     ap.add_argument("--out", default=DEFAULT_OUT, help="Путь к выходному CSV")
+    ap.add_argument("--credentials", default="credentials.json", help="Путь к файлу Google Service Account credentials")
+    ap.add_argument("--no-sheets", action="store_true", help="Отключить загрузку в Google Sheets")
     args = ap.parse_args()
 
     url = set_rows_param(args.url, args.rows)
@@ -268,6 +318,19 @@ def main():
     items = parse_list_page(html)
     write_csv(items, args.out)
     print(f"Parsed {len(items)} listings -> {args.out}")
+
+    # Upload to Google Sheets if enabled and URL is provided
+    if not args.no_sheets:
+        sheets_url = os.getenv("GOOGLE_SHEETS_URL")
+        if sheets_url and os.path.exists(args.credentials):
+            try:
+                upload_to_google_sheets(items, sheets_url, args.credentials)
+            except Exception as e:
+                print(f"Warning: Failed to upload to Google Sheets: {e}")
+        elif not sheets_url:
+            print("Info: GOOGLE_SHEETS_URL not set in .env file, skipping Google Sheets upload")
+        elif not os.path.exists(args.credentials):
+            print(f"Info: Credentials file '{args.credentials}' not found, skipping Google Sheets upload")
 
 
 if __name__ == "__main__":

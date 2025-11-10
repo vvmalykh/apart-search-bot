@@ -6,9 +6,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Python web scraper for Willhaben.at (Austrian real estate listings). The scraper extracts apartment rental listings from search result pages and exports them to CSV format.
 
+## Configuration
+
+The script uses a `.env` file for configuration. Create this file with the following variables:
+
+```
+BASE_URL=https://www.willhaben.at
+LISTING_PATH=/iad/immobilien/mietwohnungen/mietwohnung-angebote
+ROWS=10000
+SORT=1
+IS_NAVIGATION=true
+SF_ID=81997263-28bb-4349-977e-ca13391b025e
+AREA_IDS=117225,117239,117240,117241
+NO_OF_ROOMS_BUCKETS=2X2,3X3,4X4,5X5
+PROPERTY_TYPES=110,102,3
+PAGE=1
+PRICE_TO=2000
+ESTATE_SIZE_FROM=45
+```
+
+**Key configuration variables:**
+- `BASE_URL` - Willhaben base URL
+- `LISTING_PATH` - Path to listings page
+- `ROWS` - Number of results per page (default: 10000)
+- `AREA_IDS` - Comma-separated area IDs (Vienna districts)
+- `NO_OF_ROOMS_BUCKETS` - Room count filters (2X2=2 rooms, etc.)
+- `PROPERTY_TYPES` - Property type IDs
+- `PRICE_TO` - Maximum price filter
+- `ESTATE_SIZE_FROM` - Minimum size in m²
+
 ## Running the Script
 
-**Basic usage:**
+**Basic usage (uses .env configuration):**
 ```bash
 python3 parser.py
 ```
@@ -23,7 +52,7 @@ python3 parser.py --url "https://www.willhaben.at/iad/immobilien/..."
 python3 parser.py --out my_listings.csv
 ```
 
-**Control listings per page:**
+**Override ROWS from command line:**
 ```bash
 python3 parser.py --rows 100
 ```
@@ -33,11 +62,12 @@ python3 parser.py --rows 100
 The script requires:
 - `requests` - HTTP requests
 - `beautifulsoup4` - HTML parsing
-- Standard library: `argparse`, `csv`, `json`, `re`, `urllib.parse`
+- `python-dotenv` - Environment variable loading
+- Standard library: `argparse`, `csv`, `json`, `os`, `re`, `urllib.parse`
 
 Install with:
 ```bash
-pip3 install requests beautifulsoup4
+pip3 install requests beautifulsoup4 python-dotenv
 ```
 
 ## Architecture
@@ -57,7 +87,8 @@ The scraper uses a **multi-layered parsing approach** to maximize data extractio
 
 ### Key Functions
 
-- `set_rows_param(url, rows)`: URL manipulation to control pagination (default 10,000 results per page)
+- `build_url_from_env()`: Constructs search URL from environment variables in `.env` file, handling both single and multi-value query parameters
+- `set_rows_param(url, rows)`: URL manipulation to control pagination (default from .env ROWS variable)
 - `fetch(url)`: HTTP request with browser-like headers to avoid blocking
 - `extract_id_from_href(href)`: Extracts listing IDs from URLs using two patterns: query param `?adId=` or path suffix `/123456789`
 - `extract_price(text)`: Regex extraction for euro amounts

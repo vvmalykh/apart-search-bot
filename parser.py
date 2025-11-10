@@ -4,21 +4,15 @@
 import argparse
 import csv
 import json
+import os
 import re
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
-DEFAULT_ROWS = 10000
 DEFAULT_OUT = "willhaben_listings.csv"
-DEFAULT_URL = (
-    "https://www.willhaben.at/iad/immobilien/mietwohnungen/mietwohnung-angebote"
-    "?sort=1&isNavigation=true&rows=30&sfId=81997263-28bb-4349-977e-ca13391b025e"
-    "&areaId=117225&areaId=117239&areaId=117240&areaId=117241"
-    "&NO_OF_ROOMS_BUCKET=2X2&NO_OF_ROOMS_BUCKET=3X3&NO_OF_ROOMS_BUCKET=4X4&NO_OF_ROOMS_BUCKET=5X5"
-    "&PROPERTY_TYPE=110&PROPERTY_TYPE=102&PROPERTY_TYPE=3&page=1&PRICE_TO=2000&ESTATE_SIZE/LIVING_AREA_FROM=45"
-)
 
 HEADERS = {
     "User-Agent": (
@@ -29,6 +23,48 @@ HEADERS = {
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
+
+
+def build_url_from_env() -> str:
+    """
+    Build the Willhaben search URL from environment variables.
+
+    Returns:
+        Complete URL with all query parameters
+    """
+    base_url = os.getenv("BASE_URL", "https://www.willhaben.at")
+    listing_path = os.getenv("LISTING_PATH", "/iad/immobilien/mietwohnungen/mietwohnung-angebote")
+
+    # Build query parameters
+    params = {}
+
+    # Single value params
+    if rows := os.getenv("ROWS"):
+        params["rows"] = rows
+    if sort := os.getenv("SORT"):
+        params["sort"] = sort
+    if is_nav := os.getenv("IS_NAVIGATION"):
+        params["isNavigation"] = is_nav
+    if sf_id := os.getenv("SF_ID"):
+        params["sfId"] = sf_id
+    if page := os.getenv("PAGE"):
+        params["page"] = page
+    if price_to := os.getenv("PRICE_TO"):
+        params["PRICE_TO"] = price_to
+    if estate_size := os.getenv("ESTATE_SIZE_FROM"):
+        params["ESTATE_SIZE/LIVING_AREA_FROM"] = estate_size
+
+    # Multi-value params (comma-separated in .env)
+    if area_ids := os.getenv("AREA_IDS"):
+        params["areaId"] = area_ids.split(",")
+    if room_buckets := os.getenv("NO_OF_ROOMS_BUCKETS"):
+        params["NO_OF_ROOMS_BUCKET"] = room_buckets.split(",")
+    if property_types := os.getenv("PROPERTY_TYPES"):
+        params["PROPERTY_TYPE"] = property_types.split(",")
+
+    # Build URL
+    query_string = urlencode(params, doseq=True)
+    return f"{base_url}{listing_path}?{query_string}"
 
 
 def set_rows_param(url: str, rows: int | None) -> str:
@@ -257,9 +293,15 @@ def write_csv(rows: list[dict], out_path: str):
 
 
 def main():
+    # Load environment variables from .env file
+    load_dotenv()
+
+    # Build default URL from environment variables
+    default_url = build_url_from_env()
+
     ap = argparse.ArgumentParser(description="Parse Willhaben list page into CSV.")
-    ap.add_argument("--url", default=DEFAULT_URL, help="URL страницы списка Willhaben")
-    ap.add_argument("--rows", type=int, default=None, help="Значение параметра &rows= (по умолчанию 10000, если не указано и нет в URL)")
+    ap.add_argument("--url", default=default_url, help="URL страницы списка Willhaben")
+    ap.add_argument("--rows", type=int, default=None, help="Значение параметра &rows= (переопределяет значение из .env)")
     ap.add_argument("--out", default=DEFAULT_OUT, help="Путь к выходному CSV")
     args = ap.parse_args()
 

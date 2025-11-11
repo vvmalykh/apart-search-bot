@@ -16,7 +16,7 @@ from src import (
     fetch,
     set_rows_param,
     parse_listings,
-    get_first_non_promoted_listing_link,
+    get_non_promoted_listing_links,
     write_csv,
     build_search_url,
     get_logger,
@@ -119,20 +119,29 @@ def main() -> int:
                     """
                     Check if we should continue scrolling.
 
-                    Returns False (stop) if the first non-promoted listing is already in database.
-                    Returns True (continue) if it's a new listing.
+                    Iterates through currently visible listings from top to bottom:
+                    - New listings appear at TOP of page
+                    - As we scroll DOWN, older listings load at BOTTOM
+                    - Check each listing in order (top to bottom)
+                    - FIRST listing that exists in DB → we've reached "already seen" section → STOP
+                    - All listings are new → CONTINUE scrolling
+
+                    Returns False to stop, True to continue.
                     """
-                    first_link = get_first_non_promoted_listing_link(html)
-                    if first_link is None:
+                    listing_links = get_non_promoted_listing_links(html)
+
+                    if not listing_links:
                         # No listings found yet, keep scrolling
                         return True
 
-                    exists = db.listing_exists(first_link)
-                    if exists:
-                        logger.info(f"Smart scrolling: First listing already seen, stopping early")
-                        return False
+                    # Check each listing from top to bottom
+                    for link in listing_links:
+                        if db.listing_exists(link):
+                            # Found a listing that's already in DB - stop here
+                            logger.info(f"Smart scrolling: Reached already-seen listing, stopping early")
+                            return False
 
-                    # New listing, continue scrolling
+                    # All visible listings are new, continue scrolling for more
                     return True
 
                 should_continue_scrolling = check_should_continue_scrolling

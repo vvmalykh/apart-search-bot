@@ -279,19 +279,19 @@ def extract_from_jsonld(soup: BeautifulSoup, base_url: str) -> dict[str, dict[st
     return items_by_link
 
 
-def get_first_non_promoted_listing_link(html: str, base_url: str = DEFAULT_BASE_URL) -> Optional[str]:
+def get_non_promoted_listing_links(html: str, base_url: str = DEFAULT_BASE_URL) -> list[str]:
     """
-    Get the first non-promoted listing link from HTML.
+    Get all non-promoted listing links from HTML in order (top to bottom).
 
     This is used for smart scrolling to check if we've reached already-seen listings.
-    Returns the first listing link that is NOT in a TOP-ANZEIGEN section.
+    Returns listing links in the order they appear on the page (excluding TOP-ANZEIGEN).
 
     Args:
         html: HTML content of the page
         base_url: Base URL for resolving relative links
 
     Returns:
-        First non-promoted listing link, or None if no listings found
+        List of non-promoted listing links in order (top to bottom)
     """
     soup = BeautifulSoup(html, "html.parser")
 
@@ -321,6 +321,9 @@ def get_first_non_promoted_listing_link(html: str, base_url: str = DEFAULT_BASE_
     listing_link_pattern = re.compile(r"/iad/immobilien/")
     anchors = soup.find_all("a", href=listing_link_pattern)
 
+    valid_links = []
+    seen_links = set()
+
     for anchor in anchors:
         href = anchor.get("href", "")
         if not href:
@@ -332,14 +335,19 @@ def get_first_non_promoted_listing_link(html: str, base_url: str = DEFAULT_BASE_
 
         link = urljoin(base_url, href)
 
+        # Skip if already seen (dedup)
+        if link in seen_links:
+            continue
+
         # Skip if it's a promoted listing
         if link in promoted_links:
             continue
 
-        # Found first non-promoted listing
-        return link
+        # Add to valid links list
+        valid_links.append(link)
+        seen_links.add(link)
 
-    return None
+    return valid_links
 
 
 def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str, str]]:

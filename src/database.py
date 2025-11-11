@@ -177,9 +177,14 @@ class Database:
         try:
             cursor = conn.cursor()
 
-            # Check if listing exists
+            # Check if listing exists (using link as primary key)
             cursor.execute("SELECT id, listing_name, price, address, apart_size FROM listings WHERE link = %s", (listing["link"],))
             existing = cursor.fetchone()
+
+            # Normalize empty ID to None for database
+            listing_id = listing.get("id")
+            if listing_id == "":
+                listing_id = None
 
             if existing:
                 # Check if any fields changed
@@ -194,7 +199,8 @@ class Database:
                 # Compare data (excluding link)
                 has_changes = False
                 for key in ["id", "listing_name", "price", "address", "apart_size"]:
-                    if existing_data.get(key) != listing.get(key):
+                    current_value = listing_id if key == "id" else listing.get(key)
+                    if existing_data.get(key) != current_value:
                         has_changes = True
                         break
 
@@ -208,7 +214,7 @@ class Database:
                         WHERE link = %s
                         """,
                         (
-                            listing["id"],
+                            listing_id,
                             listing["listing_name"],
                             listing["price"],
                             listing["address"],
@@ -229,19 +235,19 @@ class Database:
                     cursor.close()
                     return (False, False)  # Not new, not updated
             else:
-                # Insert new listing
+                # Insert new listing (link is primary key, id can be NULL)
                 cursor.execute(
                     """
-                    INSERT INTO listings (id, listing_name, price, address, apart_size, link)
+                    INSERT INTO listings (link, id, listing_name, price, address, apart_size)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        listing["id"],
+                        listing["link"],
+                        listing_id,
                         listing["listing_name"],
                         listing["price"],
                         listing["address"],
                         listing["apart_size"],
-                        listing["link"],
                     ),
                 )
                 conn.commit()
@@ -249,7 +255,7 @@ class Database:
 
                 # Log new listing detection
                 action_logger.new_listing_detected(
-                    listing.get("id", "unknown"),
+                    listing_id or "no-id",
                     listing.get("listing_name", "")
                 )
 
@@ -300,7 +306,7 @@ class Database:
             cursor = conn.cursor(cursor_factory=extras.RealDictCursor)
             cursor.execute(
                 """
-                SELECT id, listing_name, price, address, apart_size, link,
+                SELECT link, id, listing_name, price, address, apart_size,
                        first_seen_at, last_seen_at
                 FROM listings
                 ORDER BY first_seen_at DESC
@@ -329,7 +335,7 @@ class Database:
             cursor = conn.cursor(cursor_factory=extras.RealDictCursor)
             cursor.execute(
                 """
-                SELECT id, listing_name, price, address, apart_size, link,
+                SELECT link, id, listing_name, price, address, apart_size,
                        first_seen_at, last_seen_at
                 FROM listings
                 WHERE first_seen_at > %s

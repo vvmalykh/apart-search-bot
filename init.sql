@@ -1,27 +1,26 @@
 -- Initialize database schema for Willhaben scraper
 
 -- Create listings table
+-- Using link as primary key since it's always unique
+-- id can be NULL if not extracted from some listings
 CREATE TABLE IF NOT EXISTS listings (
-    id VARCHAR(50) PRIMARY KEY,
+    link TEXT PRIMARY KEY,
+    id VARCHAR(50),
     listing_name TEXT NOT NULL,
     price VARCHAR(50),
     address TEXT,
     apart_size VARCHAR(20),
-    link TEXT UNIQUE NOT NULL,
     first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create index on link for faster lookups
-CREATE INDEX IF NOT EXISTS idx_listings_link ON listings(link);
+-- Create index on id for faster lookups (where id is not null)
+CREATE INDEX IF NOT EXISTS idx_listings_id ON listings(id) WHERE id IS NOT NULL AND id != '';
 
 -- Create index on first_seen_at for new listing detection
 CREATE INDEX IF NOT EXISTS idx_listings_first_seen ON listings(first_seen_at DESC);
-
--- Create index on id for faster lookups
-CREATE INDEX IF NOT EXISTS idx_listings_id ON listings(id);
 
 -- Create scraper_runs table for tracking executions
 CREATE TABLE IF NOT EXISTS scraper_runs (

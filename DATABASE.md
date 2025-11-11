@@ -15,16 +15,18 @@ The scraper now uses PostgreSQL for persistent storage of apartment listings. Th
 ### Database Schema
 
 **listings** table:
-- `id` - Listing ID from Willhaben (primary key)
+- `link` - Listing URL (primary key, always unique)
+- `id` - Listing ID from Willhaben (nullable, some listings don't have IDs)
 - `listing_name` - Apartment title
 - `price` - Rental price
 - `address` - Location/address
 - `apart_size` - Size in m²
-- `link` - Listing URL (unique)
 - `first_seen_at` - When first scraped
 - `last_seen_at` - When last scraped
 - `created_at` - Record creation timestamp
 - `updated_at` - Record update timestamp
+
+**Note**: `link` is used as the primary key because it's always present and unique, while `id` can be missing for some listings.
 
 **scraper_runs** table:
 - `id` - Run ID (auto-increment)
@@ -185,7 +187,7 @@ for listing in new_listings:
 
 ```sql
 -- Top 10 most recent listings
-SELECT id, listing_name, price, address, first_seen_at
+SELECT link, id, listing_name, price, address, first_seen_at
 FROM listings
 ORDER BY first_seen_at DESC
 LIMIT 10;

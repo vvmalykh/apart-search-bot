@@ -18,15 +18,19 @@ from src import (
     parse_listings,
     write_csv,
     build_search_url,
+    get_logger,
 )
 
-# Configure logging
+# Configure standard logging for console output
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Get action logger for detailed action tracking
+action_logger = get_logger()
 
 
 def main() -> int:
@@ -77,9 +81,13 @@ def main() -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
     try:
+        # Log app initialization
+        action_logger.app_init(f"Version: MVP, Output: {args.out}")
+
         # Build URL and fetch
         url = set_rows_param(args.url, args.rows)
         logger.info(f"Fetching listings from: {url}")
+        action_logger.parsing_started(url)
 
         html = fetch(url, headless=not args.no_headless)
 
@@ -88,21 +96,26 @@ def main() -> int:
 
         if not items:
             logger.warning("No listings found")
+            action_logger.warning("No listings found - parsing completed with 0 results")
             return 1
 
         # Write to CSV
         write_csv(items, args.out)
+        action_logger.records_added(len(items))
         print(f"✓ Parsed {len(items)} listings → {args.out}")
         return 0
 
     except PlaywrightTimeoutError as e:
         logger.error(f"Browser timeout: {e}")
+        action_logger.error("Browser timeout", e)
         return 1
     except IOError as e:
         logger.error(f"File I/O error: {e}")
+        action_logger.error("File I/O error", e)
         return 1
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
+        action_logger.error("Unexpected error", e)
         return 1
 
 

@@ -97,7 +97,8 @@ src/
 ├── url_builder.py  # URL construction from .env parameters
 ├── scraper.py      # Browser automation with Playwright
 ├── parser.py       # HTML parsing and data extraction
-└── exporter.py     # CSV export functionality
+├── exporter.py     # CSV export functionality
+└── logger.py       # Action logging and tracking
 
 main.py             # CLI entry point
 parser.py           # Backward compatibility shim
@@ -128,6 +129,14 @@ parser.py           # Backward compatibility shim
 
 **`src/exporter.py`**: CSV export
 - `write_csv(rows, out_path)`: Writes listings to CSV file
+
+**`src/logger.py`**: Action logging and tracking
+- `get_logger()`: Get singleton logger instance
+- Logs all major actions with timestamps (24h format)
+- Human-friendly format stored in `output/scraper.log`
+- Append mode (preserves previous logs)
+- Pre-built methods for current and future actions
+- See `LOGGING.md` for complete documentation
 
 ### Dynamic Content Loading
 

@@ -18,8 +18,10 @@ from .config import (
     MAX_SCROLL_ATTEMPTS,
     DEFAULT_ROWS,
 )
+from .logger import get_logger
 
 logger = logging.getLogger(__name__)
+action_logger = get_logger()
 
 
 def set_rows_param(url: str, rows: int | None) -> str:
@@ -112,6 +114,9 @@ def scroll_to_load_all_listings(page: Page) -> None:
     listing_count = page.evaluate('document.querySelectorAll(\'a[href*="/iad/immobilien/d/"]\').length')
     logger.info(f"Total listing links found on page: {listing_count}")
 
+    # Log scrolling completion
+    action_logger.scrolling_finished(scroll_attempts)
+
     if scroll_attempts >= MAX_SCROLL_ATTEMPTS:
         logger.warning(f"Reached maximum scroll attempts ({MAX_SCROLL_ATTEMPTS})")
 
@@ -150,10 +155,12 @@ def fetch(url: str, headless: bool = True) -> str:
 
             # Navigate to URL
             logger.info("Loading page...")
+            action_logger.open_site(url)
             page.goto(url, timeout=REQUEST_TIMEOUT, wait_until="networkidle")
 
             # Wait for initial content to load
             page.wait_for_timeout(INITIAL_CONTENT_WAIT)
+            action_logger.site_loaded(INITIAL_CONTENT_WAIT)
 
             # Scroll to load all listings
             scroll_to_load_all_listings(page)

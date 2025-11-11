@@ -5,6 +5,7 @@ from .scraper import fetch, set_rows_param
 from .parser import parse_listings
 from .exporter import write_csv
 from .url_builder import build_search_url
+from .logger import get_logger, ActionLogger
 
 __all__ = [
     "DEFAULT_OUT",
@@ -14,4 +15,6 @@ __all__ = [
     "parse_listings",
     "write_csv",
     "build_search_url",
+    "get_logger",
+    "ActionLogger",
 ]

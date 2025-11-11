@@ -279,6 +279,69 @@ def extract_from_jsonld(soup: BeautifulSoup, base_url: str) -> dict[str, dict[st
     return items_by_link
 
 
+def get_first_non_promoted_listing_link(html: str, base_url: str = DEFAULT_BASE_URL) -> Optional[str]:
+    """
+    Get the first non-promoted listing link from HTML.
+
+    This is used for smart scrolling to check if we've reached already-seen listings.
+    Returns the first listing link that is NOT in a TOP-ANZEIGEN section.
+
+    Args:
+        html: HTML content of the page
+        base_url: Base URL for resolving relative links
+
+    Returns:
+        First non-promoted listing link, or None if no listings found
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Find and collect all promoted listing links (TOP-ANZEIGEN sections)
+    promoted_links: set[str] = set()
+    top_headers = soup.find_all(string=re.compile(r"TOP[- ]ANZEIGEN?", re.IGNORECASE))
+
+    for header_text in top_headers:
+        header = header_text.parent
+        if not header or not header.name:
+            continue
+
+        section = header.parent
+        if not section:
+            continue
+
+        listing_detail_pattern = re.compile(r"/iad/immobilien/d/")
+        promoted_anchors = section.find_all("a", href=listing_detail_pattern)
+
+        for anchor in promoted_anchors:
+            href = anchor.get("href", "")
+            if href:
+                promoted_link = urljoin(base_url, href)
+                promoted_links.add(promoted_link)
+
+    # Find all listing links in order
+    listing_link_pattern = re.compile(r"/iad/immobilien/")
+    anchors = soup.find_all("a", href=listing_link_pattern)
+
+    for anchor in anchors:
+        href = anchor.get("href", "")
+        if not href:
+            continue
+
+        # Filter: Only process actual listing detail pages
+        if "/d/" not in href and "?adId=" not in href:
+            continue
+
+        link = urljoin(base_url, href)
+
+        # Skip if it's a promoted listing
+        if link in promoted_links:
+            continue
+
+        # Found first non-promoted listing
+        return link
+
+    return None
+
+
 def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str, str]]:
     """
     Parse Willhaben listing page HTML.

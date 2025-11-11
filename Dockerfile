@@ -48,5 +48,5 @@ COPY .env .
 # Create output directory
 RUN mkdir -p /app/output
 
-# Run the parser
-CMD ["python", "parser.py", "--out", "/app/output/willhaben_listings.csv"]
+# Run the main scraper
+CMD ["python", "main.py", "--out", "/app/output/willhaben_listings.csv"]

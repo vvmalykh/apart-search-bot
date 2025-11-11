@@ -16,6 +16,7 @@ from src import (
     fetch,
     set_rows_param,
     parse_listings,
+    get_first_non_promoted_listing_link,
     write_csv,
     build_search_url,
     get_logger,
@@ -108,7 +109,44 @@ def main() -> int:
         logger.info(f"Fetching listings from: {url}")
         action_logger.parsing_started(url)
 
-        html = fetch(url, headless=not args.no_headless)
+        # Create smart scrolling callback if using database
+        should_continue_scrolling = None
+        logger.info(f"[DEBUG] use_database = {use_database}")
+        if use_database:
+            logger.info("[DEBUG] Attempting to enable smart scrolling...")
+            try:
+                db = get_database()
+                logger.info(f"[DEBUG] Got database instance: {db}")
+
+                def check_should_continue_scrolling(html: str) -> bool:
+                    """
+                    Check if we should continue scrolling.
+
+                    Returns False (stop) if the first non-promoted listing is already in database.
+                    Returns True (continue) if it's a new listing.
+                    """
+                    first_link = get_first_non_promoted_listing_link(html)
+                    if first_link is None:
+                        # No listings found yet, keep scrolling
+                        return True
+
+                    exists = db.listing_exists(first_link)
+                    if exists:
+                        logger.info(f"Smart scrolling: First listing already seen, stopping early")
+                        return False
+
+                    # New listing, continue scrolling
+                    return True
+
+                should_continue_scrolling = check_should_continue_scrolling
+                logger.info("✓ Smart scrolling enabled: will stop when reaching seen listings")
+            except Exception as e:
+                logger.warning(f"Could not enable smart scrolling: {e}. Using regular scrolling.")
+                import traceback
+                logger.warning(traceback.format_exc())
+                should_continue_scrolling = None
+
+        html = fetch(url, headless=not args.no_headless, should_continue_scrolling=should_continue_scrolling)
 
         # Parse and extract listings
         items = parse_listings(html)

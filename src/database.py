@@ -163,6 +163,29 @@ class Database:
         finally:
             self.return_connection(conn)
 
+    def listing_exists(self, link: str) -> bool:
+        """
+        Check if a listing with the given link already exists in the database.
+
+        Args:
+            link: Listing URL
+
+        Returns:
+            True if listing exists, False otherwise
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM listings WHERE link = %s LIMIT 1", (link,))
+            result = cursor.fetchone()
+            cursor.close()
+            return result is not None
+        except Exception as e:
+            logger.error(f"Failed to check if listing exists: {e}")
+            return False
+        finally:
+            self.return_connection(conn)
+
     def upsert_listing(self, listing: Dict[str, str]) -> tuple[bool, bool]:
         """
         Insert or update a listing.

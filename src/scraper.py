@@ -55,12 +55,17 @@ def set_rows_param(url: str, rows: int | None) -> str:
     ))
 
 
-def scroll_to_load_all_listings(page: Page) -> None:
+def scroll_to_load_all_listings(page: Page, should_continue_callback=None) -> None:
     """
     Scroll page to bottom to load all dynamically-loaded listings.
 
+    Optionally accepts a callback to determine if scrolling should continue.
+    The callback receives current HTML and returns True to continue, False to stop.
+
     Args:
         page: Playwright Page object
+        should_continue_callback: Optional callable(html: str) -> bool
+                                 Returns True to continue scrolling, False to stop
 
     Raises:
         PlaywrightTimeoutError: If scrolling times out
@@ -70,6 +75,7 @@ def scroll_to_load_all_listings(page: Page) -> None:
     last_height = page.evaluate("document.body.scrollHeight")
     scroll_attempts = 0
     no_change_count = 0
+    stopped_by_callback = False
 
     while scroll_attempts < MAX_SCROLL_ATTEMPTS:
         # Scroll down by one viewport height
@@ -84,6 +90,15 @@ def scroll_to_load_all_listings(page: Page) -> None:
         # Get new scroll height
         new_height = page.evaluate("document.body.scrollHeight")
         scroll_attempts += 1
+
+        # Check callback if provided (check every few scrolls to avoid overhead)
+        if should_continue_callback and scroll_attempts % 3 == 0:
+            current_html = page.content()
+            should_continue = should_continue_callback(current_html)
+            if not should_continue:
+                logger.info(f"Callback requested stop after {scroll_attempts} scrolls (all new listings loaded)")
+                stopped_by_callback = True
+                break
 
         # Check if page height changed
         if new_height > last_height:
@@ -117,17 +132,21 @@ def scroll_to_load_all_listings(page: Page) -> None:
     # Log scrolling completion
     action_logger.scrolling_finished(scroll_attempts)
 
-    if scroll_attempts >= MAX_SCROLL_ATTEMPTS:
+    if stopped_by_callback:
+        logger.info("Smart scrolling: stopped early (encountered seen listings)")
+    elif scroll_attempts >= MAX_SCROLL_ATTEMPTS:
         logger.warning(f"Reached maximum scroll attempts ({MAX_SCROLL_ATTEMPTS})")
 
 
-def fetch(url: str, headless: bool = True) -> str:
+def fetch(url: str, headless: bool = True, should_continue_scrolling=None) -> str:
     """
     Fetch HTML content from URL using Playwright with scrolling.
 
     Args:
         url: URL to fetch
         headless: Run browser in headless mode (default: True)
+        should_continue_scrolling: Optional callable(html: str) -> bool
+                                  Callback to determine if scrolling should continue
 
     Returns:
         HTML content as string
@@ -162,8 +181,8 @@ def fetch(url: str, headless: bool = True) -> str:
             page.wait_for_timeout(INITIAL_CONTENT_WAIT)
             action_logger.site_loaded(INITIAL_CONTENT_WAIT)
 
-            # Scroll to load all listings
-            scroll_to_load_all_listings(page)
+            # Scroll to load all listings (with optional smart stop)
+            scroll_to_load_all_listings(page, should_continue_callback=should_continue_scrolling)
 
             # Get final HTML
             html = page.content()

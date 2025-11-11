@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: willhaben-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-willhaben}
+      POSTGRES_USER: ${POSTGRES_USER:-willhaben_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-willhaben_pass}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-willhaben_user}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - willhaben-network
+
+  scraper:
+    build: .
+    container_name: willhaben-scraper
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-willhaben}
+      POSTGRES_USER: ${POSTGRES_USER:-willhaben_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-willhaben_pass}
+    volumes:
+      - ./output:/app/output
+    networks:
+      - willhaben-network
+    # Override default command if needed
+    # command: python main.py --verbose
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  willhaben-network:
+    driver: bridge

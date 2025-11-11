@@ -98,10 +98,13 @@ src/
 ├── scraper.py      # Browser automation with Playwright
 ├── parser.py       # HTML parsing and data extraction
 ├── exporter.py     # CSV export functionality
-└── logger.py       # Action logging and tracking
+├── logger.py       # Action logging and tracking
+└── database.py     # PostgreSQL database operations
 
 main.py             # CLI entry point
 parser.py           # Backward compatibility shim
+docker-compose.yml  # Docker Compose with PostgreSQL
+init.sql            # Database schema initialization
 ```
 
 ### Module Responsibilities
@@ -137,6 +140,15 @@ parser.py           # Backward compatibility shim
 - Append mode (preserves previous logs)
 - Pre-built methods for current and future actions
 - See `LOGGING.md` for complete documentation
+
+**`src/database.py`**: PostgreSQL database operations
+- `get_database()`: Get singleton database instance
+- `upsert_listing()`: Insert or update listing (tracks first_seen/last_seen)
+- `save_listings()`: Batch save with new/updated counts
+- `start_run()` / `finish_run()`: Track scraper executions
+- `get_new_listings_since()`: Query new listings by timestamp
+- Connection pooling for performance
+- See `DATABASE.md` for complete documentation
 
 ### Dynamic Content Loading
 

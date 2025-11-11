@@ -19,6 +19,8 @@ from src import (
     write_csv,
     build_search_url,
     get_logger,
+    get_database,
+    HAS_DATABASE,
 )
 
 # Configure standard logging for console output
@@ -74,6 +76,16 @@ def main() -> int:
         action="store_true",
         help="Run browser in visible mode (for debugging)"
     )
+    parser.add_argument(
+        "--use-csv",
+        action="store_true",
+        help="Save to CSV instead of database (legacy mode)"
+    )
+    parser.add_argument(
+        "--no-db",
+        action="store_true",
+        help="Skip database operations (useful for testing)"
+    )
     args = parser.parse_args()
 
     # Set logging level
@@ -81,8 +93,15 @@ def main() -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
     try:
+        # Determine storage mode
+        use_database = not args.use_csv and not args.no_db and HAS_DATABASE
+
+        if not HAS_DATABASE and not args.use_csv:
+            logger.warning("Database module not available (psycopg2 not installed). Using CSV mode.")
+
         # Log app initialization
-        action_logger.app_init(f"Version: MVP, Output: {args.out}")
+        storage_mode = "database" if use_database else "CSV"
+        action_logger.app_init(f"Version: MVP, Storage: {storage_mode}, Output: {args.out}")
 
         # Build URL and fetch
         url = set_rows_param(args.url, args.rows)
@@ -99,10 +118,44 @@ def main() -> int:
             action_logger.warning("No listings found - parsing completed with 0 results")
             return 1
 
-        # Write to CSV
-        write_csv(items, args.out)
-        action_logger.records_added(len(items))
-        print(f"✓ Parsed {len(items)} listings → {args.out}")
+        # Save to database or CSV
+        if use_database:
+            try:
+                db = get_database()
+                run_id = db.start_run()
+
+                new_count, updated_count = db.save_listings(items)
+
+                db.finish_run(
+                    run_id=run_id,
+                    listings_found=len(items),
+                    new_listings=new_count,
+                    updated_listings=updated_count,
+                    status="success"
+                )
+
+                action_logger.records_added(len(items))
+                print(f"✓ Saved {len(items)} listings to database: {new_count} new, {updated_count} updated")
+
+                # Also save to CSV as backup if --out is specified
+                if args.out != DEFAULT_OUT:
+                    write_csv(items, args.out)
+                    logger.info(f"Also saved to CSV: {args.out}")
+
+                db.close_all()
+
+            except Exception as e:
+                logger.error(f"Database error: {e}. Falling back to CSV.")
+                action_logger.error("Database error, falling back to CSV", e)
+                write_csv(items, args.out)
+                action_logger.records_added(len(items))
+                print(f"✓ Saved {len(items)} listings to CSV (database failed) → {args.out}")
+        else:
+            # CSV mode
+            write_csv(items, args.out)
+            action_logger.records_added(len(items))
+            print(f"✓ Parsed {len(items)} listings → {args.out}")
+
         return 0
 
     except PlaywrightTimeoutError as e:

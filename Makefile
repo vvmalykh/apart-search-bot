@@ -1,8 +1,11 @@
-.PHONY: build run clean help logs shell
+.PHONY: build run clean help logs shell up down db-console db-logs db-reset
 
 # Docker image name
 IMAGE_NAME := willhaben-scraper
 CONTAINER_NAME := willhaben-scraper-run
+
+# Docker Compose project name
+COMPOSE_PROJECT := willhaben
 
 # Default target
 .DEFAULT_GOAL := help
@@ -11,7 +14,12 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Available targets:'
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Docker Compose (with database):'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E 'up|down|db-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Legacy Docker (without database):'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v -E 'up|down|db-' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build Docker image
 	@echo "Building Docker image..."
@@ -53,3 +61,48 @@ logs: ## Show logs from last run (if container is still running)
 	@docker logs $(CONTAINER_NAME)
 
 all: build run ## Build and run scraper
+
+# ==================== Docker Compose Commands ====================
+
+up: ## Start database and run scraper with docker-compose
+	@echo "Starting services with docker-compose..."
+	docker-compose up --build
+
+up-detached: ## Start database in background
+	@echo "Starting database in background..."
+	docker-compose up -d postgres
+	@echo "✓ Database is starting. Use 'make db-console' to connect."
+
+down: ## Stop all docker-compose services
+	@echo "Stopping all services..."
+	docker-compose down
+	@echo "✓ Services stopped"
+
+db-console: ## Enter PostgreSQL console (psql)
+	@echo "Connecting to database..."
+	@docker-compose exec postgres psql -U willhaben_user -d willhaben
+
+db-logs: ## Show PostgreSQL logs
+	@docker-compose logs -f postgres
+
+db-reset: ## Reset database (WARNING: deletes all data)
+	@echo "⚠️  This will delete all database data!"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		docker-compose down -v; \
+		docker-compose up -d postgres; \
+		echo "✓ Database reset complete"; \
+	else \
+		echo "Cancelled"; \
+	fi
+
+run-with-db: up-detached ## Run scraper locally with database in background
+	@echo "Waiting for database to be ready..."
+	@sleep 3
+	@echo "Running scraper..."
+	python3 main.py
+	@echo ""
+	@echo "✓ Scraper complete. Database still running."
+	@echo "  Use 'make db-console' to view data"
+	@echo "  Use 'make down' to stop database"

@@ -7,6 +7,15 @@ from .exporter import write_csv
 from .url_builder import build_search_url
 from .logger import get_logger, ActionLogger
 
+# Optional database import (requires psycopg2)
+try:
+    from .database import get_database, Database
+    HAS_DATABASE = True
+except ImportError:
+    get_database = None
+    Database = None
+    HAS_DATABASE = False
+
 __all__ = [
     "DEFAULT_OUT",
     "DEFAULT_BASE_URL",
@@ -17,4 +26,7 @@ __all__ = [
     "build_search_url",
     "get_logger",
     "ActionLogger",
+    "get_database",
+    "Database",
+    "HAS_DATABASE",
 ]

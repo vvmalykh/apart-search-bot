@@ -1,7 +1,7 @@
 Step 1:
 - [X] All listings parser
 - [X] Scroll all listings
-- [ ] Short parsing Logs (initial+summary)
+- [X] Short parsing Logs (initial+summary)
 - [ ] Save states between parsing runs
 - [ ] Scroll untill there are new listings
 

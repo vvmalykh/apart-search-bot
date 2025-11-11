@@ -111,12 +111,9 @@ def main() -> int:
 
         # Create smart scrolling callback if using database
         should_continue_scrolling = None
-        logger.info(f"[DEBUG] use_database = {use_database}")
         if use_database:
-            logger.info("[DEBUG] Attempting to enable smart scrolling...")
             try:
                 db = get_database()
-                logger.info(f"[DEBUG] Got database instance: {db}")
 
                 def check_should_continue_scrolling(html: str) -> bool:
                     """
@@ -142,8 +139,6 @@ def main() -> int:
                 logger.info("✓ Smart scrolling enabled: will stop when reaching seen listings")
             except Exception as e:
                 logger.warning(f"Could not enable smart scrolling: {e}. Using regular scrolling.")
-                import traceback
-                logger.warning(traceback.format_exc())
                 should_continue_scrolling = None
 
         html = fetch(url, headless=not args.no_headless, should_continue_scrolling=should_continue_scrolling)

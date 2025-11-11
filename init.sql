@@ -2,10 +2,8 @@
 
 -- Create listings table
 -- Using link as primary key since it's always unique
--- id can be NULL if not extracted from some listings
 CREATE TABLE IF NOT EXISTS listings (
     link TEXT PRIMARY KEY,
-    id VARCHAR(50),
     listing_name TEXT NOT NULL,
     price VARCHAR(50),
     address TEXT,
@@ -15,9 +13,6 @@ CREATE TABLE IF NOT EXISTS listings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Create index on id for faster lookups (where id is not null)
-CREATE INDEX IF NOT EXISTS idx_listings_id ON listings(id) WHERE id IS NOT NULL AND id != '';
 
 -- Create index on first_seen_at for new listing detection
 CREATE INDEX IF NOT EXISTS idx_listings_first_seen ON listings(first_seen_at DESC);
@@ -49,7 +44,6 @@ CREATE TRIGGER update_listings_updated_at BEFORE UPDATE ON listings
 
 -- Comments for documentation
 COMMENT ON TABLE listings IS 'Stores apartment listings from Willhaben';
-COMMENT ON COLUMN listings.id IS 'Listing ID from Willhaben';
 COMMENT ON COLUMN listings.first_seen_at IS 'When this listing was first scraped';
 COMMENT ON COLUMN listings.last_seen_at IS 'When this listing was last seen in a scrape';
 COMMENT ON TABLE scraper_runs IS 'Tracks each execution of the scraper';

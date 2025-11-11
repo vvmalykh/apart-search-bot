@@ -13,7 +13,7 @@ DEFAULT_LISTING_PATH = "/iad/immobilien/mietwohnungen/mietwohnung-angebote"
 DEFAULT_ROWS = 10000
 
 # CSV export fields
-CSV_FIELDS = ["id", "listing_name", "price", "address", "apart_size", "link"]
+CSV_FIELDS = ["listing_name", "price", "address", "apart_size", "link"]
 
 # Browser automation settings
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30000"))

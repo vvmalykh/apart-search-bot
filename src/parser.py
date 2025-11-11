@@ -30,33 +30,6 @@ def normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def extract_id_from_href(href: str) -> Optional[str]:
-    """
-    Extract listing ID from href.
-
-    Tries two patterns:
-    1. Query parameter: ?adId=123456789
-    2. Path suffix: /.../123456789
-
-    Args:
-        href: URL or path to extract ID from
-
-    Returns:
-        Listing ID if found, None otherwise
-    """
-    # Try query parameter pattern
-    match = re.search(r"[?&]adId=(\d+)", href)
-    if match:
-        return match.group(1)
-
-    # Try path suffix pattern (at least 6 digits)
-    match = re.search(r"/(\d{6,})/?$", href)
-    if match:
-        return match.group(1)
-
-    return None
-
-
 def extract_price(text: str) -> Optional[str]:
     """
     Extract price from text.
@@ -245,17 +218,7 @@ def extract_by_card(container: Tag, base_url: str) -> Optional[dict[str, str]]:
     if not address:
         address = guess_address(lines)
 
-    # Extract ID from href or data attributes
-    ad_id = extract_id_from_href(href)
-    if not ad_id:
-        data_attrs = ["data-id", "data-adid", "data-item-id", "data-tracking-id"]
-        for attr in data_attrs:
-            if container.has_attr(attr):
-                ad_id = container.get(attr)
-                break
-
     return {
-        "id": ad_id or "",
         "listing_name": listing_name,
         "price": price or "",
         "address": address or "",
@@ -418,7 +381,7 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
     # Filter out invalid items
     filtered = [
         item for item in results
-        if item.get("link") and (item.get("id") or item.get("listing_name"))
+        if item.get("link") and item.get("listing_name")
     ]
 
     # Deduplicate by link

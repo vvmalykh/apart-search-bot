@@ -178,29 +178,22 @@ class Database:
             cursor = conn.cursor()
 
             # Check if listing exists (using link as primary key)
-            cursor.execute("SELECT id, listing_name, price, address, apart_size FROM listings WHERE link = %s", (listing["link"],))
+            cursor.execute("SELECT listing_name, price, address, apart_size FROM listings WHERE link = %s", (listing["link"],))
             existing = cursor.fetchone()
-
-            # Normalize empty ID to None for database
-            listing_id = listing.get("id")
-            if listing_id == "":
-                listing_id = None
 
             if existing:
                 # Check if any fields changed
                 existing_data = {
-                    "id": existing[0],
-                    "listing_name": existing[1],
-                    "price": existing[2],
-                    "address": existing[3],
-                    "apart_size": existing[4],
+                    "listing_name": existing[0],
+                    "price": existing[1],
+                    "address": existing[2],
+                    "apart_size": existing[3],
                 }
 
                 # Compare data (excluding link)
                 has_changes = False
-                for key in ["id", "listing_name", "price", "address", "apart_size"]:
-                    current_value = listing_id if key == "id" else listing.get(key)
-                    if existing_data.get(key) != current_value:
+                for key in ["listing_name", "price", "address", "apart_size"]:
+                    if existing_data.get(key) != listing.get(key):
                         has_changes = True
                         break
 
@@ -209,12 +202,11 @@ class Database:
                     cursor.execute(
                         """
                         UPDATE listings
-                        SET id = %s, listing_name = %s, price = %s, address = %s,
+                        SET listing_name = %s, price = %s, address = %s,
                             apart_size = %s, last_seen_at = CURRENT_TIMESTAMP
                         WHERE link = %s
                         """,
                         (
-                            listing_id,
                             listing["listing_name"],
                             listing["price"],
                             listing["address"],
@@ -235,15 +227,14 @@ class Database:
                     cursor.close()
                     return (False, False)  # Not new, not updated
             else:
-                # Insert new listing (link is primary key, id can be NULL)
+                # Insert new listing (link is primary key)
                 cursor.execute(
                     """
-                    INSERT INTO listings (link, id, listing_name, price, address, apart_size)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO listings (link, listing_name, price, address, apart_size)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
                         listing["link"],
-                        listing_id,
                         listing["listing_name"],
                         listing["price"],
                         listing["address"],
@@ -255,7 +246,6 @@ class Database:
 
                 # Log new listing detection
                 action_logger.new_listing_detected(
-                    listing_id or "no-id",
                     listing.get("listing_name", "")
                 )
 

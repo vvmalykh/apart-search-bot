@@ -133,7 +133,6 @@ make db-reset
 
 **listings:**
 - `link` (TEXT, PRIMARY KEY) - Listing URL
-- `id` (VARCHAR) - Listing ID (nullable)
 - `listing_name` (TEXT) - Apartment title
 - `price` (VARCHAR) - Rental price
 - `address` (TEXT) - Location

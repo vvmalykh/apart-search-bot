@@ -115,11 +115,9 @@ class ActionLogger:
 
     # ==================== Future Actions ====================
 
-    def new_listing_detected(self, listing_id: str, title: str = "") -> None:
+    def new_listing_detected(self, title: str = "") -> None:
         """Log new listing detected."""
-        details = f"ID: {listing_id}"
-        if title:
-            details += f", Title: {title}"
+        details = f"Title: {title}" if title else "New listing"
         self._log("INFO", "NEW LISTING DETECTED", details)
 
     def listing_opened(self, listing_id: str, url: str = "") -> None:

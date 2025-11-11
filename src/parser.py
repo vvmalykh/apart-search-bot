@@ -369,19 +369,50 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
             or anchor.parent
         )
 
-        # Skip promoted/featured listings
+        # Skip promoted/featured listings (TOP-ANZEIGEN)
         if container:
             container_text = container.get_text(" ", strip=True)
             container_classes = " ".join(container.get("class", [])).lower()
+            container_html = str(container)[:500].lower()  # Check raw HTML too
 
-            promoted_keywords = ["top-anzeige", "topanzeige", "promoted", "featured", "sponsored", "premium"]
-            if any(keyword in container_classes for keyword in promoted_keywords):
-                logger.debug(f"Skipping promoted listing: {link}")
+            # Check CSS classes for promoted indicators
+            promoted_class_keywords = [
+                "top-anzeige", "topanzeige", "top_anzeige",
+                "promoted", "featured", "sponsored", "premium",
+                "highlight", "vip", "boost"
+            ]
+            if any(keyword in container_classes for keyword in promoted_class_keywords):
+                logger.info(f"Skipping promoted listing (class): {link}")
                 continue
 
+            # Check visible text for TOP-ANZEIGEN markers
             if re.search(r"TOP[- ]ANZEIGEN?", container_text, re.IGNORECASE):
-                logger.debug(f"Skipping TOP-ANZEIGEN listing: {link}")
+                logger.info(f"Skipping TOP-ANZEIGEN listing (text): {link}")
                 continue
+
+            # Check for data attributes that might indicate promoted status
+            if container.get("data-promoted") or container.get("data-featured"):
+                logger.info(f"Skipping promoted listing (data-attr): {link}")
+                continue
+
+            # Check for any parent with promoted classes
+            parent = container.parent
+            for _ in range(3):  # Check up to 3 levels up
+                if parent and parent.name:
+                    parent_classes = " ".join(parent.get("class", [])).lower()
+                    if any(keyword in parent_classes for keyword in promoted_class_keywords):
+                        logger.info(f"Skipping promoted listing (parent class): {link}")
+                        break
+                    parent = parent.parent
+            else:
+                # No promoted parent found, continue processing
+                pass
+
+            # If we broke out of the loop, skip this listing
+            if parent and parent.name:
+                parent_classes = " ".join(parent.get("class", [])).lower()
+                if any(keyword in parent_classes for keyword in promoted_class_keywords):
+                    continue
 
         item = extract_by_card(container, base_url)
         if not item:

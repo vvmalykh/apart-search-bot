@@ -89,6 +89,46 @@ make build
 
 ## Architecture
 
+The codebase is organized into clean, focused modules for maintainability and AI-assisted development:
+
+```
+src/
+├── config.py       # All constants and environment configuration
+├── url_builder.py  # URL construction from .env parameters
+├── scraper.py      # Browser automation with Playwright
+├── parser.py       # HTML parsing and data extraction
+└── exporter.py     # CSV export functionality
+
+main.py             # CLI entry point
+parser.py           # Backward compatibility shim
+```
+
+### Module Responsibilities
+
+**`src/config.py`**: Central configuration
+- All constants (URLs, timeouts, CSV fields)
+- Environment variable loading
+- Browser headers and patterns
+
+**`src/url_builder.py`**: URL construction
+- `build_search_url()`: Builds Willhaben URL from .env parameters
+
+**`src/scraper.py`**: Browser automation
+- `fetch(url, headless)`: Launches Playwright, loads page, returns HTML
+- `scroll_to_load_all_listings(page)`: Scrolls to load all dynamic content
+- `set_rows_param(url, rows)`: URL manipulation for pagination
+
+**`src/parser.py`**: Data extraction
+- `parse_listings(html, base_url)`: Main parsing orchestrator
+- `extract_from_jsonld()`: Extracts data from JSON-LD structured data
+- `extract_by_card()`: Parses individual listing cards
+- `extract_price()`, `extract_size()`, `extract_address_from_text()`: Regex extractors
+- `clean_listing_name()`: Removes metadata from listing titles
+- `guess_address()`: Heuristic-based address detection
+
+**`src/exporter.py`**: CSV export
+- `write_csv(rows, out_path)`: Writes listings to CSV file
+
 ### Dynamic Content Loading
 
 The scraper uses **Playwright** for browser automation:
@@ -100,28 +140,11 @@ The scraper uses **Playwright** for browser automation:
 
 ### Data Extraction Strategy
 
-The scraper uses a **multi-layered parsing approach** to maximize data extraction reliability:
+Multi-layered parsing approach for maximum reliability:
 
-1. **JSON-LD parsing** (`extract_from_jsonld`): Attempts to extract structured data from `<script type="application/ld+json">` tags, specifically looking for `ItemList` schemas with listing names and URLs.
-
-2. **HTML card parsing** (`extract_by_card`): Parses individual listing cards from the HTML DOM by:
-   - Finding links matching pattern `/iad/immobilien/(?:d/|.*\?adId=)`
-   - Traversing up to parent containers (`<article>`, `<li>`, or divs with class patterns like "result", "card", "box", "tile")
-   - Extracting data using regex patterns and CSS class heuristics
-
-3. **Fallback mechanisms**: If explicit address/location classes aren't found, uses geographic pattern matching (`guess_address`) to identify location strings containing Austrian region names.
-
-### Key Functions
-
-- `build_url_from_env()`: Constructs search URL from environment variables in `.env` file, handling both single and multi-value query parameters
-- `set_rows_param(url, rows)`: URL manipulation to control pagination (default from .env ROWS variable)
-- `scroll_to_load_all_listings(page)`: Scrolls Playwright page to bottom repeatedly until all content loaded
-- `fetch(url, headless)`: Launches Playwright browser, loads URL, scrolls to load all content, returns HTML
-- `extract_id_from_href(href)`: Extracts listing IDs from URLs using two patterns: query param `?adId=` or path suffix `/123456789`
-- `extract_price(text)`: Regex extraction for euro amounts
-- `extract_size(text)`: Regex extraction for m² measurements
-- `guess_address(lines)`: Heuristic-based address detection using Austrian location keywords
-- `parse_list_page(html, base_url)`: Main orchestrator that combines JSON-LD and HTML parsing, deduplicates by link
+1. **JSON-LD parsing**: Extracts structured data from `<script type="application/ld+json">` tags
+2. **HTML card parsing**: Parses listing cards by finding links and traversing to parent containers
+3. **Fallback mechanisms**: Uses geographic pattern matching to identify addresses
 
 ### Output Format
 
@@ -129,4 +152,4 @@ CSV with columns: `id`, `listing_name`, `price`, `address`, `apart_size`, `link`
 
 ### Anti-Scraping Measures
 
-The script uses realistic browser headers (parser.py:23-31) including User-Agent, Accept-Language, and Accept headers to mimic a real browser and reduce likelihood of being blocked.
+Uses realistic browser headers (src/config.py) including User-Agent, Accept-Language, and Accept headers to mimic a real browser.

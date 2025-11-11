@@ -25,6 +25,11 @@ output/
 # Documentation
 README.md
 CLAUDE.md
+REFACTORING.md
+
+# Old/backup files
+parser_old.py
+test_*.py
 
 # Docker
 Dockerfile

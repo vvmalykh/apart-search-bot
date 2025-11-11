@@ -11,7 +11,10 @@ Step 2:
 - [ ] Save Listing Photos
 
 Step 3:
-- [ ] Send templated message to host of new Listings
+- [ ] Create Telegram (TG) bot
+- [ ] TG bot sends message with new listing (all parsed fields + photos)
+- [ ] Make it possible to send templated message to host of new Listings
+- [ ] Add 2 buttons to TG message with new listings: skip, email (= send templated email)
 
 Step 4:
 - [ ] Deploy this bot and run scheduled

@@ -3,7 +3,7 @@ Step 1:
 - [X] Scroll all listings
 - [X] Short parsing Logs (initial+summary)
 - [X] Save states between parsing runs
-- [ ] Scroll untill there are new listings
+- [X] Scroll untill there are new listings
 
 Step 2:
 - [ ] Open Listing Card

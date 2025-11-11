@@ -60,7 +60,9 @@ rebuild: clean build ## Clean and rebuild Docker image
 logs: ## Show logs from last run (if container is still running)
 	@docker logs $(CONTAINER_NAME)
 
-all: build run ## Build and run scraper
+all: ## Build and run scraper with database (docker-compose)
+	@echo "Building and running scraper with database..."
+	docker-compose up --build scraper
 
 # ==================== Docker Compose Commands ====================
 

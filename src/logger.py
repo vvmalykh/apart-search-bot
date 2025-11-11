@@ -50,13 +50,8 @@ class ActionLogger:
         )
         file_handler.setFormatter(formatter)
 
-        # Console handler for immediate feedback
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-
+        # Only file handler - console logging is handled by main.py's standard logger
         self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
 
     def _log(self, level: str, action: str, details: str = "") -> None:
         """

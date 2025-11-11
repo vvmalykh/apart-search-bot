@@ -322,9 +322,10 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
 
     Uses multi-layered approach:
     1. Extract structured data from JSON-LD
-    2. Find listing cards via anchor links
-    3. Extract data from each card
-    4. Merge with JSON-LD data and deduplicate
+    2. Find and skip promoted listings (TOP-ANZEIGEN sections)
+    3. Find listing cards via anchor links
+    4. Extract data from each card
+    5. Merge with JSON-LD data and deduplicate
 
     Args:
         html: HTML content of the page
@@ -339,12 +340,42 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
     jsonld_titles = extract_from_jsonld(soup, base_url)
     logger.debug(f"Found {len(jsonld_titles)} items in JSON-LD")
 
+    # Find and collect all promoted listing links (TOP-ANZEIGEN sections)
+    promoted_links: set[str] = set()
+    top_headers = soup.find_all(string=re.compile(r"TOP[- ]ANZEIGEN?", re.IGNORECASE))
+
+    for header_text in top_headers:
+        # Find the header element (usually h2 or h3)
+        header = header_text.parent
+        if not header or not header.name:
+            continue
+
+        # Navigate up to find the section container
+        section = header.parent
+        if not section:
+            continue
+
+        # Find all listing links in this section
+        listing_detail_pattern = re.compile(r"/iad/immobilien/d/")
+        promoted_anchors = section.find_all("a", href=listing_detail_pattern)
+
+        for anchor in promoted_anchors:
+            href = anchor.get("href", "")
+            if href:
+                promoted_link = urljoin(base_url, href)
+                promoted_links.add(promoted_link)
+                logger.debug(f"Found promoted link: {promoted_link}")
+
+    if promoted_links:
+        logger.info(f"Found {len(promoted_links)} promoted listings (TOP-ANZEIGEN) to skip")
+
     # Find all listing links
     listing_link_pattern = re.compile(r"/iad/immobilien/")
     anchors = soup.find_all("a", href=listing_link_pattern)
     logger.debug(f"Found {len(anchors)} listing anchors")
 
     seen_links: set[str] = set()
+    skipped_promoted = 0
     results: list[dict[str, str]] = []
 
     for anchor in anchors:
@@ -359,6 +390,11 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
         if "/d/" not in href and "?adId=" not in href:
             continue
 
+        # Skip promoted listings (TOP-ANZEIGEN)
+        if link in promoted_links:
+            skipped_promoted += 1
+            continue
+
         seen_links.add(link)
 
         # Find card container
@@ -368,51 +404,6 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
             or anchor.find_parent("div", class_=re.compile(r"(result|card|box|tile)", re.IGNORECASE))
             or anchor.parent
         )
-
-        # Skip promoted/featured listings (TOP-ANZEIGEN)
-        if container:
-            container_text = container.get_text(" ", strip=True)
-            container_classes = " ".join(container.get("class", [])).lower()
-            container_html = str(container)[:500].lower()  # Check raw HTML too
-
-            # Check CSS classes for promoted indicators
-            promoted_class_keywords = [
-                "top-anzeige", "topanzeige", "top_anzeige",
-                "promoted", "featured", "sponsored", "premium",
-                "highlight", "vip", "boost"
-            ]
-            if any(keyword in container_classes for keyword in promoted_class_keywords):
-                logger.info(f"Skipping promoted listing (class): {link}")
-                continue
-
-            # Check visible text for TOP-ANZEIGEN markers
-            if re.search(r"TOP[- ]ANZEIGEN?", container_text, re.IGNORECASE):
-                logger.info(f"Skipping TOP-ANZEIGEN listing (text): {link}")
-                continue
-
-            # Check for data attributes that might indicate promoted status
-            if container.get("data-promoted") or container.get("data-featured"):
-                logger.info(f"Skipping promoted listing (data-attr): {link}")
-                continue
-
-            # Check for any parent with promoted classes
-            parent = container.parent
-            for _ in range(3):  # Check up to 3 levels up
-                if parent and parent.name:
-                    parent_classes = " ".join(parent.get("class", [])).lower()
-                    if any(keyword in parent_classes for keyword in promoted_class_keywords):
-                        logger.info(f"Skipping promoted listing (parent class): {link}")
-                        break
-                    parent = parent.parent
-            else:
-                # No promoted parent found, continue processing
-                pass
-
-            # If we broke out of the loop, skip this listing
-            if parent and parent.name:
-                parent_classes = " ".join(parent.get("class", [])).lower()
-                if any(keyword in parent_classes for keyword in promoted_class_keywords):
-                    continue
 
         item = extract_by_card(container, base_url)
         if not item:
@@ -435,5 +426,5 @@ def parse_listings(html: str, base_url: str = DEFAULT_BASE_URL) -> list[dict[str
     for item in filtered:
         unique_items[item["link"]] = item
 
-    logger.info(f"Parsed {len(unique_items)} unique listings")
+    logger.info(f"Parsed {len(unique_items)} unique listings (skipped {skipped_promoted} promoted)")
     return list(unique_items.values())

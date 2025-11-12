@@ -293,6 +293,15 @@ DOWNLOAD_PHOTOS=true
 
 ### Running the Bot
 
+**Quick Start - Run everything (recommended):**
+```bash
+make start-all
+```
+This command:
+1. Starts the database
+2. Runs an initial scrape to populate the database with current listings
+3. Starts the Telegram bot in background for continuous monitoring
+
 **Start the bot in foreground (see logs):**
 ```bash
 make bot-up
@@ -316,6 +325,11 @@ make bot-down
 **Restart the bot:**
 ```bash
 make bot-restart
+```
+
+**Stop all services (database + bot):**
+```bash
+make down
 ```
 
 ### How It Works

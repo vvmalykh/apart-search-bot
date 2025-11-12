@@ -64,6 +64,28 @@ all: ## Build and run scraper with database (docker-compose)
 	@echo "Building and running scraper with database..."
 	docker-compose up --build scraper
 
+start-all: ## Run initial scrape and start bot in background (complete setup)
+	@echo "==> Step 1: Starting database..."
+	@docker-compose up --build -d postgres
+	@echo "Waiting for database to be ready..."
+	@sleep 3
+	@echo ""
+	@echo "==> Step 2: Running initial scrape to populate database..."
+	@docker-compose run --rm scraper python3 main.py --download-photos
+	@echo ""
+	@echo "==> Step 3: Starting Telegram bot in background..."
+	@docker-compose up --build -d bot
+	@echo ""
+	@echo "✓ All services started!"
+	@echo "  - Database: running"
+	@echo "  - Initial scrape: complete"
+	@echo "  - Telegram bot: running in background"
+	@echo ""
+	@echo "Useful commands:"
+	@echo "  make bot-logs     - View bot logs"
+	@echo "  make db-console   - Connect to database"
+	@echo "  make down         - Stop all services"
+
 # ==================== Docker Compose Commands ====================
 
 up: ## Start database and run scraper with docker-compose

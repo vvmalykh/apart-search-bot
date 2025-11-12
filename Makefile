@@ -109,7 +109,7 @@ run-with-db: up-detached ## Run scraper locally with database in background
 	@echo "  Use 'make db-console' to view data"
 	@echo "  Use 'make down' to stop database"
 
-test-flow: ## Test new listing detection flow: down -> all -> delete top listing -> run with photos
+test-flow: ## Test new listing detection flow: down -> all -> delete top listing -> start bot with notifications
 	@echo "==> Step 1: Stopping services..."
 	@$(MAKE) down
 	@echo ""
@@ -120,15 +120,23 @@ test-flow: ## Test new listing detection flow: down -> all -> delete top listing
 	@docker-compose exec -T postgres psql -U willhaben_user -d willhaben -c "\
 		DELETE FROM listings \
 		WHERE link = (SELECT link FROM listings ORDER BY first_seen_at DESC LIMIT 1) \
-		RETURNING listing_name, link;"
+		RETURNING listing_name, link;" | tee /tmp/deleted_listing.txt
 	@echo ""
-	@echo "==> Step 4: Running scraper with photo download (will detect deleted listing as new)..."
-	@docker-compose run --rm scraper python3 main.py --download-photos
+	@echo "==> Step 4: Cleaning photos directory..."
+	@rm -rf photos/*
+	@echo "✓ Photos directory cleaned"
 	@echo ""
-	@echo "✓ Test flow complete!"
-	@echo "  New listing detected and processed (photos downloaded)"
-	@echo "  Use 'make db-console' to verify database"
-	@echo "  Use 'make down' to stop services"
+	@echo "==> Step 5: Starting Telegram bot (will detect deleted listing as new)..."
+	@echo "⚠️  Bot will run continuously. Press Ctrl+C when you verify the Telegram notification."
+	@echo "⚠️  Check your Telegram channel for the notification with photos in media group."
+	@echo ""
+	@docker-compose up --build -d postgres
+	@sleep 3
+	@docker-compose up --build bot
+	@echo ""
+	@echo "✓ Test flow stopped (bot shut down)"
+	@echo "  Use 'make bot-up-detached' to restart bot in background"
+	@echo "  Use 'make down' to stop all services"
 
 # ==================== Telegram Bot Commands ====================
 

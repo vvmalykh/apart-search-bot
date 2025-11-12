@@ -228,7 +228,7 @@ python3 main.py --download-photos --no-headless
 
 ## Testing New Listing Detection
 
-The primary purpose of this application is to detect new apartment listings and process them (e.g., send to Telegram, download photos). To test the new listing detection flow:
+The primary purpose of this application is to detect new apartment listings and process them (e.g., send to Telegram, download photos). To test the complete new listing detection and notification flow:
 
 ```bash
 make test-flow
@@ -238,28 +238,33 @@ make test-flow
 1. Stops all services (`make down`)
 2. Rebuilds and runs initial scrape (`make all`)
 3. Deletes the most recent listing from the database (top of search results)
-4. Runs scraper with `--download-photos` flag (detects deleted listing as new)
+4. Cleans photos directory
+5. Starts Telegram bot (detects deleted listing as new, downloads photos, sends notification)
 
 **Why this works:**
 This simulates real-world behavior where new listings appear at the top of search results. By deleting the most recent listing and re-scraping, the scraper treats it as a brand new discovery.
 
 **Expected behavior:**
 - Deleted listing is re-detected as "new"
-- New listing triggers are activated (photos downloaded, ready for Telegram notification, etc.)
-- Photos are saved to `photos/ab/cd/abcd.../` directory structure
+- Bot downloads photos to `photos/ab/cd/abcd.../` directory structure
+- Bot sends Telegram notification with all photos as media group (album)
 - Database tracks `first_seen_at` timestamp
 
 **Verify results:**
-```bash
-# Check downloaded photos
-ls -la photos/
+1. **Check Telegram channel**: You should receive a notification with listing details and all photos in a single album
+2. **Check downloaded photos**: `ls -la photos/`
+3. **Check database**:
+   ```bash
+   make db-console
+   SELECT listing_name, first_seen_at, last_seen_at FROM listings ORDER BY first_seen_at DESC LIMIT 5;
+   ```
 
-# Check database
-make db-console
-SELECT listing_name, first_seen_at, last_seen_at FROM listings ORDER BY first_seen_at DESC LIMIT 5;
-```
+**Stop the test:**
+- Press `Ctrl+C` to stop the bot after verifying the notification
+- Use `make down` to stop all services
+- Use `make bot-up-detached` to restart bot in background for continuous monitoring
 
-Use this command to test any feature that depends on detecting new listings (Telegram notifications, photo downloads, alerts, etc.).
+Use this command to test the complete end-to-end flow including Telegram notifications.
 
 ## Telegram Bot
 

@@ -42,6 +42,33 @@ services:
     # Override default command if needed
     # command: python main.py --verbose
 
+  bot:
+    build: .
+    container_name: willhaben-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-willhaben}
+      POSTGRES_USER: ${POSTGRES_USER:-willhaben_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-willhaben_pass}
+      # Telegram configuration
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      SCRAPER_INTERVAL_MINUTES: ${SCRAPER_INTERVAL_MINUTES:-5}
+      DOWNLOAD_PHOTOS: ${DOWNLOAD_PHOTOS:-true}
+      PHOTOS_DIR: ${PHOTOS_DIR:-photos}
+    volumes:
+      - ./output:/app/output
+      - ./photos:/app/photos
+    networks:
+      - willhaben-network
+    command: python bot_main.py
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local

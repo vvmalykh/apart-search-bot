@@ -8,11 +8,11 @@ Step 1:
 Step 2:
 - [X] Open Listing Card
 - [X] Parse Listing Card
-- [ ] Save Listing Photos
+- [X] Save Listing Photos
 
 Step 3:
-- [ ] Create Telegram (TG) bot
-- [ ] TG bot sends message with new listing (all parsed fields + photos)
+- [X] Create Telegram (TG) bot
+- [X] TG bot sends message with new listing (all parsed fields + photos)
 - [ ] Make it possible to send templated message to host of new Listings
 - [ ] Add 2 buttons to TG message with new listings: skip, email (= send templated email)
 - [ ] If there is no response from user for N minutes, send email automatically

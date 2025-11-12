@@ -260,3 +260,156 @@ SELECT listing_name, first_seen_at, last_seen_at FROM listings ORDER BY first_se
 ```
 
 Use this command to test any feature that depends on detecting new listings (Telegram notifications, photo downloads, alerts, etc.).
+
+## Telegram Bot
+
+The Telegram bot runs continuously, checking for new apartment listings at regular intervals and sending notifications to a Telegram channel or chat.
+
+### Setup
+
+**1. Create a Telegram Bot:**
+   - Message [@BotFather](https://t.me/BotFather) on Telegram
+   - Send `/newbot` and follow instructions
+   - Copy the bot token
+
+**2. Get Chat ID:**
+   - Add your bot to a channel or group chat
+   - For channels: forward a message from the channel to [@userinfobot](https://t.me/userinfobot)
+   - For group chats: add the bot to the group, then forward a message to @userinfobot
+   - Copy the chat ID (will be negative for groups/channels)
+
+**3. Configure .env:**
+```env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=-1001234567890
+SCRAPER_INTERVAL_MINUTES=5
+DOWNLOAD_PHOTOS=true
+```
+
+### Running the Bot
+
+**Start the bot in foreground (see logs):**
+```bash
+make bot-up
+```
+
+**Start the bot in background:**
+```bash
+make bot-up-detached
+```
+
+**View bot logs:**
+```bash
+make bot-logs
+```
+
+**Stop the bot:**
+```bash
+make bot-down
+```
+
+**Restart the bot:**
+```bash
+make bot-restart
+```
+
+### How It Works
+
+1. **Periodic Scraping**: Bot runs the scraper every N minutes (configured via `SCRAPER_INTERVAL_MINUTES`)
+2. **Smart Scrolling**: Uses intelligent scrolling to stop when reaching already-seen listings
+3. **New Listing Detection**: Compares scrape results with database to identify new listings
+4. **Photo Downloads**: Automatically downloads photos for new listings (if enabled)
+5. **Telegram Notifications**: Sends formatted messages with listing details and photos to configured chat
+
+### Message Format
+
+Each new listing notification includes:
+- 🏠 Listing name
+- 💰 Price
+- 📍 Address
+- 📏 Size
+- 🔗 Link to listing
+- 📸 Photos (up to 10 images)
+
+### Configuration Variables
+
+All configuration is done via `.env` file:
+
+- `TELEGRAM_BOT_TOKEN` - Bot API token from BotFather (required)
+- `TELEGRAM_CHAT_ID` - Channel or chat ID to send messages to (required)
+- `SCRAPER_INTERVAL_MINUTES` - How often to check for new listings (default: 5)
+- `DOWNLOAD_PHOTOS` - Whether to download photos for new listings (default: true)
+- `PHOTOS_DIR` - Base directory for storing photos (default: photos)
+
+### Architecture
+
+The bot consists of three main modules:
+
+**`src/telegram_bot.py`**: Telegram messaging
+- `TelegramNotifier` class for sending messages and photos
+- Message formatting and photo handling
+- Rate limiting and error handling
+
+**`src/scheduler.py`**: Periodic scraping orchestration
+- `ScraperScheduler` class for running scraper at intervals
+- Smart scrolling integration
+- New listing detection
+- Callback system for notifications
+
+**`bot_main.py`**: Main application entry point
+- Initializes bot configuration
+- Coordinates scheduler and notifier
+- Handles graceful shutdown
+- Runs continuously with restart policy
+
+### Docker Service
+
+The bot runs as a separate Docker service (`bot`) defined in `docker-compose.yml`:
+- Runs continuously with `restart: unless-stopped` policy
+- Shares database with scraper service
+- Mounts same volumes for photos and output
+- Auto-starts on system boot (if Docker is configured)
+
+### Testing
+
+To test the bot with the new listing detection flow:
+
+```bash
+# 1. Set up your bot token and chat ID in .env
+# 2. Run test flow (will trigger bot notification)
+make test-flow
+
+# 3. Check your Telegram channel for the notification
+```
+
+Or test the bot manually:
+```bash
+# Start the bot
+make bot-up-detached
+
+# Delete a recent listing to simulate a new one
+make db-console
+DELETE FROM listings WHERE link = (SELECT link FROM listings ORDER BY first_seen_at DESC LIMIT 1);
+\q
+
+# Wait for next scraper run (max 5 minutes)
+# Check Telegram channel for notification
+make bot-logs
+```
+
+### Troubleshooting
+
+**Bot not sending messages:**
+- Check bot token and chat ID are correct in `.env`
+- Verify bot has permission to post in the channel
+- Check bot logs: `make bot-logs`
+
+**No new listings detected:**
+- Database might already have all listings
+- Use `make test-flow` to simulate new listings
+- Check scraper logs for errors
+
+**Photos not downloading:**
+- Ensure `DOWNLOAD_PHOTOS=true` in `.env`
+- Check disk space in `photos/` directory
+- Verify Playwright can access listing pages

@@ -1,4 +1,4 @@
-.PHONY: build run clean help logs shell up down db-console db-logs db-reset
+.PHONY: build run clean help logs shell up down db-console db-logs db-reset bot-up bot-down bot-logs bot-restart
 
 # Docker image name
 IMAGE_NAME := willhaben-scraper
@@ -129,3 +129,34 @@ test-flow: ## Test new listing detection flow: down -> all -> delete top listing
 	@echo "  New listing detected and processed (photos downloaded)"
 	@echo "  Use 'make db-console' to verify database"
 	@echo "  Use 'make down' to stop services"
+
+# ==================== Telegram Bot Commands ====================
+
+bot-up: ## Start Telegram bot (runs continuously, checking for new listings)
+	@echo "Starting Telegram bot..."
+	@echo "⚠️  Make sure to set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first!"
+	docker-compose up --build -d postgres
+	@echo "Waiting for database to be ready..."
+	@sleep 3
+	docker-compose up --build bot
+
+bot-down: ## Stop Telegram bot
+	@echo "Stopping Telegram bot..."
+	docker-compose stop bot
+	@echo "✓ Bot stopped"
+
+bot-logs: ## Show Telegram bot logs (follow mode)
+	@docker-compose logs -f bot
+
+bot-restart: ## Restart Telegram bot
+	@echo "Restarting Telegram bot..."
+	docker-compose restart bot
+	@echo "✓ Bot restarted"
+
+bot-up-detached: ## Start Telegram bot in background
+	@echo "Starting Telegram bot in background..."
+	@echo "⚠️  Make sure to set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first!"
+	docker-compose up --build -d postgres bot
+	@echo "✓ Bot started in background"
+	@echo "  Use 'make bot-logs' to view logs"
+	@echo "  Use 'make bot-down' to stop"

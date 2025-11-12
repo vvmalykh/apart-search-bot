@@ -42,6 +42,7 @@ RUN playwright install-deps chromium
 # Copy application files
 COPY src/ ./src/
 COPY main.py .
+COPY bot_main.py .
 COPY parser.py .
 COPY .env .
 

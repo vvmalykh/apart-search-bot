@@ -6,8 +6,8 @@ Step 1:
 - [X] Scroll untill there are new listings
 
 Step 2:
-- [ ] Open Listing Card
-- [ ] Parse Listing Card
+- [X] Open Listing Card
+- [X] Parse Listing Card
 - [ ] Save Listing Photos
 
 Step 3:

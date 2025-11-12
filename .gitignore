@@ -17,6 +17,9 @@ ENV/
 *.log
 !output/.gitkeep
 
+# Photos directory (hierarchical storage for listing images)
+photos/
+
 # IDE
 .vscode/
 .idea/

@@ -6,6 +6,7 @@ from .parser import parse_listings, get_non_promoted_listing_links
 from .exporter import write_csv
 from .url_builder import build_search_url
 from .logger import get_logger, ActionLogger
+from .photos import download_listing_photos, download_photos_for_listings
 
 # Optional database import (requires psycopg2)
 try:
@@ -30,4 +31,6 @@ __all__ = [
     "get_database",
     "Database",
     "HAS_DATABASE",
+    "download_listing_photos",
+    "download_photos_for_listings",
 ]

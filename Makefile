@@ -108,3 +108,24 @@ run-with-db: up-detached ## Run scraper locally with database in background
 	@echo "✓ Scraper complete. Database still running."
 	@echo "  Use 'make db-console' to view data"
 	@echo "  Use 'make down' to stop database"
+
+test-flow: ## Test new listing detection flow: down -> all -> delete top listing -> run with photos
+	@echo "==> Step 1: Stopping services..."
+	@$(MAKE) down
+	@echo ""
+	@echo "==> Step 2: Building and running initial scrape..."
+	@$(MAKE) all
+	@echo ""
+	@echo "==> Step 3: Deleting top listing from database..."
+	@docker-compose exec -T postgres psql -U willhaben_user -d willhaben -c "\
+		DELETE FROM listings \
+		WHERE link = (SELECT link FROM listings ORDER BY first_seen_at DESC LIMIT 1) \
+		RETURNING listing_name, link;"
+	@echo ""
+	@echo "==> Step 4: Running scraper with photo download (will detect deleted listing as new)..."
+	@docker-compose run --rm scraper python3 main.py --download-photos
+	@echo ""
+	@echo "✓ Test flow complete!"
+	@echo "  New listing detected and processed (photos downloaded)"
+	@echo "  Use 'make db-console' to verify database"
+	@echo "  Use 'make down' to stop services"

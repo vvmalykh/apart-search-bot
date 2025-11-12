@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL RULE: Docker-Only Execution
+
+**NEVER run Python locally. NEVER install dependencies locally. ALWAYS use Docker.**
+
+- ❌ Never run `python3 ...` or `pip install ...` on the host machine
+- ❌ Never install packages or dependencies locally
+- ✅ Always use `docker-compose run --rm scraper ...` to execute Python code
+- ✅ Always use `make build` to rebuild after code changes
+- ✅ All testing, running, and dependency management happens inside Docker containers
+
+This project is fully Dockerized. All dependencies are managed within the Docker image.
+
 ## Project Overview
 
 This is a Python web scraper for Willhaben.at (Austrian real estate listings). The scraper uses Playwright to load dynamic content, automatically scrolls to load all listings, and exports them to CSV format. Fully Dockerized for easy deployment.
@@ -53,19 +65,19 @@ make run
 
 Output saved to: `./output/willhaben_listings.csv`
 
-### Local Python
+### Running with Docker Compose
 
-**Basic usage:**
-```bash
-python3 parser.py
-```
+**All commands must be run inside Docker containers:**
 
-**With options:**
 ```bash
-python3 parser.py --verbose              # Detailed logs
-python3 parser.py --no-headless          # Show browser
-python3 parser.py --rows 100             # Override ROWS
-python3 parser.py --out custom.csv       # Custom output
+# Basic usage
+docker-compose run --rm scraper python3 main.py
+
+# With options
+docker-compose run --rm scraper python3 main.py --verbose              # Detailed logs
+docker-compose run --rm scraper python3 main.py --no-headless          # Show browser
+docker-compose run --rm scraper python3 main.py --rows 100             # Override ROWS
+docker-compose run --rm scraper python3 main.py --download-photos      # Download photos for new listings
 ```
 
 ## Dependencies
@@ -74,15 +86,13 @@ The script requires:
 - `playwright` - Browser automation and dynamic content loading
 - `beautifulsoup4` - HTML parsing
 - `python-dotenv` - Environment variable loading
+- `psycopg2-binary` - PostgreSQL database driver
+- `requests` - HTTP library for photo downloads
 - Standard library: `argparse`, `csv`, `json`, `logging`, `os`, `re`, `sys`, `time`, `urllib.parse`
 
-Install with:
-```bash
-pip3 install -r requirements.txt
-playwright install chromium
-```
+**All dependencies are pre-installed in the Docker image. No local installation needed.**
 
-Or use Docker (includes everything):
+To rebuild the Docker image after changes:
 ```bash
 make build
 ```
@@ -99,12 +109,14 @@ src/
 ├── parser.py       # HTML parsing and data extraction
 ├── exporter.py     # CSV export functionality
 ├── logger.py       # Action logging and tracking
-└── database.py     # PostgreSQL database operations
+├── database.py     # PostgreSQL database operations
+└── photos.py       # Photo downloading for listings
 
 main.py             # CLI entry point
 parser.py           # Backward compatibility shim
 docker-compose.yml  # Docker Compose with PostgreSQL
 init.sql            # Database schema initialization
+photos/             # Downloaded listing photos (excluded from git)
 ```
 
 ### Module Responsibilities
@@ -150,6 +162,16 @@ init.sql            # Database schema initialization
 - Connection pooling for performance
 - See `DATABASE.md` for complete documentation
 
+**`src/photos.py`**: Photo downloading and storage
+- `download_listing_photos(link, listing_name)`: Download all photos for a single listing
+- `download_photos_for_listings(listings)`: Batch download photos for multiple listings
+- `get_listing_dir(link)`: Get hierarchical directory path for storing photos
+- Uses Playwright to fetch listing pages
+- Extracts image URLs from gallery and thumbnails
+- Stores photos in hierarchical structure: `photos/ab/cd/abcd.../`
+- Skips listings that already have downloaded photos
+- Creates metadata.txt file with link and listing name
+
 ### Dynamic Content Loading
 
 The scraper uses **Playwright** for browser automation:
@@ -174,3 +196,67 @@ CSV with columns: `id`, `listing_name`, `price`, `address`, `apart_size`, `link`
 ### Anti-Scraping Measures
 
 Uses realistic browser headers (src/config.py) including User-Agent, Accept-Language, and Accept headers to mimic a real browser.
+
+### Photo Downloading
+
+The scraper can automatically download photos for new listings when run with `--download-photos` flag:
+
+**Features:**
+- Downloads photos only for new listings (first-time discoveries)
+- Stores photos in hierarchical directory structure to avoid filesystem limits
+- Directory path: `photos/ab/cd/abcd.../` (based on MD5 hash of listing URL)
+- Skips listings that already have photos downloaded
+- Creates `metadata.txt` file in each listing directory with link and name
+- Extracts images from Willhaben gallery and thumbnails
+- Filters out tiny thumbnails, keeps high-resolution images only
+
+**Usage:**
+```bash
+# Enable photo downloading
+python3 main.py --download-photos
+
+# Photo downloading in headful mode (see browser)
+python3 main.py --download-photos --no-headless
+```
+
+**Configuration (via .env):**
+- `PHOTOS_DIR` - Base directory for photos (default: `photos`)
+- `PHOTO_TIMEOUT` - Page load timeout in ms (default: `10000`)
+- `MAX_PHOTOS_PER_LISTING` - Maximum photos per listing (default: `50`)
+
+**Note:** Photo downloading requires database mode (enabled by default). Photos are NOT downloaded in CSV-only mode (`--use-csv`).
+
+## Testing New Listing Detection
+
+The primary purpose of this application is to detect new apartment listings and process them (e.g., send to Telegram, download photos). To test the new listing detection flow:
+
+```bash
+make test-flow
+```
+
+**What it does:**
+1. Stops all services (`make down`)
+2. Rebuilds and runs initial scrape (`make all`)
+3. Deletes the most recent listing from the database (top of search results)
+4. Runs scraper with `--download-photos` flag (detects deleted listing as new)
+
+**Why this works:**
+This simulates real-world behavior where new listings appear at the top of search results. By deleting the most recent listing and re-scraping, the scraper treats it as a brand new discovery.
+
+**Expected behavior:**
+- Deleted listing is re-detected as "new"
+- New listing triggers are activated (photos downloaded, ready for Telegram notification, etc.)
+- Photos are saved to `photos/ab/cd/abcd.../` directory structure
+- Database tracks `first_seen_at` timestamp
+
+**Verify results:**
+```bash
+# Check downloaded photos
+ls -la photos/
+
+# Check database
+make db-console
+SELECT listing_name, first_seen_at, last_seen_at FROM listings ORDER BY first_seen_at DESC LIMIT 5;
+```
+
+Use this command to test any feature that depends on detecting new listings (Telegram notifications, photo downloads, alerts, etc.).

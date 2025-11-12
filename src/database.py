@@ -319,7 +319,7 @@ class Database:
             cursor = conn.cursor(cursor_factory=extras.RealDictCursor)
             cursor.execute(
                 """
-                SELECT link, id, listing_name, price, address, apart_size,
+                SELECT link, listing_name, price, address, apart_size,
                        first_seen_at, last_seen_at
                 FROM listings
                 ORDER BY first_seen_at DESC
@@ -348,7 +348,7 @@ class Database:
             cursor = conn.cursor(cursor_factory=extras.RealDictCursor)
             cursor.execute(
                 """
-                SELECT link, id, listing_name, price, address, apart_size,
+                SELECT link, listing_name, price, address, apart_size,
                        first_seen_at, last_seen_at
                 FROM listings
                 WHERE first_seen_at > %s

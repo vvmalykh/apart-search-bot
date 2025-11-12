@@ -36,6 +36,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-willhaben_pass}
     volumes:
       - ./output:/app/output
+      - ./photos:/app/photos
     networks:
       - willhaben-network
     # Override default command if needed

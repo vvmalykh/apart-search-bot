@@ -26,6 +26,9 @@ SCROLL_WAIT_FINAL = int(os.getenv("SCROLL_WAIT_FINAL", "2000"))
 SCROLL_STALE_THRESHOLD = int(os.getenv("SCROLL_STALE_THRESHOLD", "5"))
 MAX_SCROLL_ATTEMPTS = int(os.getenv("MAX_SCROLL_ATTEMPTS", "100"))
 
+# Photo downloading settings
+PHOTO_CAROUSEL_DELAY = int(os.getenv("PHOTO_CAROUSEL_DELAY", "300"))
+
 # Parsing settings
 MIN_ADDRESS_LENGTH = int(os.getenv("MIN_ADDRESS_LENGTH", "6"))
 

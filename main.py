@@ -22,6 +22,7 @@ from src import (
     get_logger,
     get_database,
     HAS_DATABASE,
+    download_photos_for_listings,
 )
 
 # Configure standard logging for console output
@@ -86,6 +87,11 @@ def main() -> int:
         "--no-db",
         action="store_true",
         help="Skip database operations (useful for testing)"
+    )
+    parser.add_argument(
+        "--download-photos",
+        action="store_true",
+        help="Download photos for new listings (requires database mode)"
     )
     args = parser.parse_args()
 
@@ -178,6 +184,26 @@ def main() -> int:
 
                 action_logger.records_added(len(items))
                 print(f"✓ Saved {len(items)} listings to database: {new_count} new, {updated_count} updated")
+
+                # Download photos for new listings if requested
+                if args.download_photos and new_count > 0:
+                    logger.info(f"Downloading photos for {new_count} new listings...")
+                    from datetime import datetime, timedelta
+
+                    # Get new listings from this run (using a reasonable time window)
+                    cutoff_time = datetime.now() - timedelta(minutes=5)
+                    new_listings = db.get_new_listings_since(cutoff_time)
+
+                    if new_listings:
+                        print(f"📸 Downloading photos for {len(new_listings)} new listings...")
+                        stats = download_photos_for_listings(
+                            new_listings,
+                            headless=not args.no_headless
+                        )
+                        print(f"✓ Photo download complete: {stats['photos_downloaded']} photos downloaded, "
+                              f"{stats['skipped']} skipped, {stats['errors']} errors")
+                    else:
+                        logger.info("No new listings found for photo download")
 
                 # Also save to CSV as backup if --out is specified
                 if args.out != DEFAULT_OUT:
